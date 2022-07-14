@@ -5,6 +5,11 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[target.x86_64-unknown-linux-gnu]
+rustflags = [
+    "-C", "link-arg=-fuse-ld=lld",
+]
+
 [dependencies]
 shared = { path = "../beam/shared" }
 #proxy = { path = "../beam/proxy" }
@@ -21,3 +26,7 @@ pretty_env_logger = "*"
 serde = "*"
 serde_json = "*"
 hyper_serde = "0.13"
+
+clap = {version = "3", features = ["derive"]}
+
+thiserror = "*"

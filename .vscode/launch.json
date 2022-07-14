@@ -20,7 +20,13 @@
                 }
             },
             "args": [],
-            "cwd": "${workspaceFolder}"
+            "cwd": "${workspaceFolder}",
+            "env": { 
+                "RUST_LOG": "tracing=info,hyper=info,debug",
+                "APP_ID": "pusher1.proxy23.localhost",
+                "PROXY_APIKEY": "Pusher1Secret",
+                "PROXY_URL": "http://localhost:8081"
+            }
         },
         {
             "type": "lldb",

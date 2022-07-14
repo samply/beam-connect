@@ -1,4 +1,4 @@
-use hyper::{Method, Uri, body::Bytes, HeaderMap};
+use hyper::{Method, Uri, HeaderMap};
 use serde::{Serialize, Deserialize};
 
 #[derive(Serialize)]
