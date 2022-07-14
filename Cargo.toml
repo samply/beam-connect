@@ -1,0 +1,23 @@
+[package]
+name = "beam-httpusher"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+shared = { path = "../beam/shared" }
+#proxy = { path = "../beam/proxy" }
+
+#axum = "0.5.12"
+tokio = { version = "1", features = ["macros","rt-multi-thread","signal"] }
+hyper = { version = "0", features = ["server", "http1", "full"] }
+tower-http = { version = "0", features = ["trace"] }
+tower = "*"
+
+log = "*"
+pretty_env_logger = "*"
+
+serde = "*"
+serde_json = "*"
+hyper_serde = "0.13"
