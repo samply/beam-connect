@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-use hyper::{http::uri::Authority, Uri};
+use hyper::Uri;
 use shared::beam_id::{AppId, BeamId};
 
-pub type InternalHost = Authority;
+use crate::structs::InternalHost;
 
 pub fn get_examples() -> HashMap<InternalHost, AppId> {
     let app_id = AppId::new("pusher1.proxy23.localhost").unwrap();
@@ -12,5 +12,6 @@ pub fn get_examples() -> HashMap<InternalHost, AppId> {
         ("http://ip-api.com/json", app_id)
     ].map(|(k,v)| (Uri::try_from(k).unwrap().authority().unwrap().to_owned(), v))
     .into_iter().collect();
+    
     input
 }
