@@ -76,7 +76,7 @@ impl Config {
         //     debug!("Setting {}", key);
         // }
         let args = CliArgs::parse();
-        AppId::set_broker_id(shared::beam_id::app_to_broker_id(&args.app_id));
+        AppId::set_broker_id(shared::beam_id::app_to_broker_id(&args.app_id)?);
         let my_app_id = AppId::new(&args.app_id)?;
         // let proxy_id = my_app_id.proxy_id();
 
