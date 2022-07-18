@@ -5,7 +5,7 @@ use shared::beam_id::AppOrProxyId;
 use thiserror::Error;
 
 #[derive(Error,Debug)]
-pub(crate) enum HttPusherError {
+pub(crate) enum BeamConnectError {
     #[error("Proxy rejected our authorization")]
     ProxyRejectedAuthorization,
     #[error("Unable to communicate with Proxy: {0}")]

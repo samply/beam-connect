@@ -2,7 +2,7 @@ use hyper::{Method, Uri, HeaderMap, StatusCode};
 use serde::{Serialize, Deserialize};
 use shared::MsgTaskRequest;
 
-use crate::errors::HttPusherError;
+use crate::errors::BeamConnectError;
 
 #[derive(Serialize,Deserialize)]
 pub(crate) struct HttpRequest {
@@ -25,14 +25,14 @@ pub(crate) struct HttpResponse {
 }
 
 pub(crate) trait IsValidHttpTask {
-    fn http_request(&self) -> Result<HttpRequest,HttPusherError>;
+    fn http_request(&self) -> Result<HttpRequest,BeamConnectError>;
 }
 
 impl IsValidHttpTask for MsgTaskRequest {
-    fn http_request(&self) -> Result<HttpRequest,HttPusherError> {
+    fn http_request(&self) -> Result<HttpRequest,BeamConnectError> {
         let req_struct: HttpRequest = serde_json::from_str(&self.body)?;
         if false { // TODO
-            return Err(HttPusherError::IdNotAuthorizedToAccessUrl(self.from.clone(), req_struct.url));
+            return Err(BeamConnectError::IdNotAuthorizedToAccessUrl(self.from.clone(), req_struct.url));
         }
         Ok(req_struct)
     }

@@ -6,7 +6,7 @@ use shared::beam_id::{AppId, BeamId};
 use crate::structs::InternalHost;
 
 pub fn get_examples() -> HashMap<InternalHost, AppId> {
-    let app_id = AppId::new("pusher1.proxy23.localhost").unwrap();
+    let app_id = AppId::new("connect1.proxy23.localhost").unwrap();
     let input = [
         ("https://ifconfig.me/", app_id.clone()),
         ("http://ip-api.com/json", app_id)

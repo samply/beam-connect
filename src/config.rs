@@ -32,7 +32,7 @@ struct CliArgs {
     #[clap(long, env, value_parser)]
     proxy_url: Uri,
 
-    /// Your short App ID (e.g. httpusher1)
+    /// Your short App ID (e.g. connect1)
     #[clap(long, env, value_parser)]
     app_id: String,
 

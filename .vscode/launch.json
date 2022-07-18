@@ -7,15 +7,15 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug executable 'beam-httpusher'",
+            "name": "Debug executable 'connect'",
             "cargo": {
                 "args": [
                     "build",
-                    "--bin=beam-httpusher",
-                    "--package=beam-httpusher"
+                    "--bin=connect",
+                    "--package=connect"
                 ],
                 "filter": {
-                    "name": "beam-httpusher",
+                    "name": "connect",
                     "kind": "bin"
                 }
             },
@@ -23,24 +23,24 @@
             "cwd": "${workspaceFolder}",
             "env": { 
                 "RUST_LOG": "tracing=info,hyper=info,debug",
-                "APP_ID": "pusher1.proxy23.localhost",
-                "PROXY_APIKEY": "Pusher1Secret",
+                "APP_ID": "connect1.proxy23.localhost",
+                "PROXY_APIKEY": "Connect1Secret",
                 "PROXY_URL": "http://localhost:8081"
             }
         },
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug unit tests in executable 'beam-httpusher'",
+            "name": "Debug unit tests in executable 'connect'",
             "cargo": {
                 "args": [
                     "test",
                     "--no-run",
-                    "--bin=beam-httpusher",
-                    "--package=beam-httpusher"
+                    "--bin=connect",
+                    "--package=connect"
                 ],
                 "filter": {
-                    "name": "beam-httpusher",
+                    "name": "connect",
                     "kind": "bin"
                 }
             },

@@ -5,7 +5,7 @@ use log::{info, debug, warn, error};
 use serde_json::Value;
 use shared::{beam_id::AppId, MsgTaskResult, MsgTaskRequest};
 
-use crate::{config::Config, structs::{InternalHost, MyStatusCode}, msg::{HttpRequest, HttpResponse}, errors::HttPusherError};
+use crate::{config::Config, structs::{InternalHost, MyStatusCode}, msg::{HttpRequest, HttpResponse}, errors::BeamConnectError};
 
 /// GET   http://some.internal.system?a=b&c=d
 /// Host: <identical>
@@ -20,7 +20,7 @@ pub(crate) async fn handler_http(
     let uri = req.uri().to_owned();
     let headers = req.headers_mut();
 
-    headers.insert(header::VIA, format!("Via: Samply.Beam.Httpusher/0.1 {}", config.my_app_id).parse().unwrap());
+    headers.insert(header::VIA, format!("Via: Samply.Beam.Connect/0.1 {}", config.my_app_id).parse().unwrap());
 
     let auth = 
         headers.remove(header::PROXY_AUTHORIZATION)
