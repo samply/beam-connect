@@ -69,12 +69,15 @@ curl -x http://localbeamconnect:8081 -H "Proxy-Authorization: ApiKey connect1.pr
 
 The parameter `-x http://localbeamconnect:8081` instructs cURL to use
 Beam.Connect as a HTTP proxy.
+
 The header field `-H "Proxy-Authorization: ApiKey
 connect1.proxy23.localhost Connect1Secret"` is the authentication information
 between Beam.Connect and Samply.Proxy.
+
 The `-H "Authorization: basic
 YWxhZGRpbjpvcGVuc2VzYW1l"` header will be forwarded unmodified to the intended
 resource.
+
 Finally, `http://ip.api.com/json` is the requested resource.
 
 A configurable mapping between requested resource and Beam.AppId must be
