@@ -12,10 +12,11 @@ You can either build and run Samply.Beam.Connect as a local application, or use
 the docker image provided at the [Docker Hub](https://hub.docker.com/r/samply/beam-connect).
 
 Samply.Beam.Connect provides two not exclusive modes:
- 2. The Forwarder Mode, in which Beam.Connect encapsulates a HTTP Request and
+ 1. The Forwarder Mode, in which Beam.Connect encapsulates a HTTP Request and
     sends it into the Samply.Beam Pipeline
- 1. The Receiver Mode, in which Beam.Connect receives an encapsulated HTTP
+ 2. The Receiver Mode, in which Beam.Connect receives an encapsulated HTTP
     Request and replies by communication with the desired endpoint.
+
 Of course, one process of Beam.Connect can be used in both modes simultaneously.
 
 ### Download and build locally
@@ -87,11 +88,6 @@ A mishap in communication will be returned as appropriate HTTP replies.
 
 
 ## Notes
-At the moment Samply.Beam.Connect does not implement streaming and does not
-support HTTPS connection. In the intended usage scenario, both Beam.Connect and
-Samply.Proxy are positioned in the same privileged network, thus, not incurring
-any security risks. The Samply.Proxy signs and encrypts the payloads on its own.
+At the moment Samply.Beam.Connect does not implement streaming and does not support HTTPS connections. In the intended usage scenario, both Samply.Beam.Connect and Samply.Beam.Proxy are positioned right next to each other in the same privileged network and thus speak plain HTTP. Of course, for outgoing traffic, the Samply.Proxy signs and encrypts the payloads on its own.
 
-In Receiving Mode, Beam.Connect only relays requests to allow-listed resources
-to mitigate possible misuse.
-
+In Receiving Mode, Beam.Connect only relays requests to allow-listed resources to mitigate possible misuse.
