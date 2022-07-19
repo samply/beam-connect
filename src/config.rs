@@ -49,8 +49,8 @@ struct CliArgs {
     bind_addr: String,
 
     /// File containing the endpoint allow list
-    #[clap(long, env, value_parser, default_value = "/run/config/targets.conf")]
-    target_conf_file: PathBuf,
+    #[clap(long, env, value_parser, default_value = "/conf/targets.conf")]
+    pub target_conf_file: PathBuf,
 
     // /// (included for technical reasons)
     // #[clap(long, env, value_parser)]
