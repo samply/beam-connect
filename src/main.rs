@@ -7,7 +7,6 @@ use shared::beam_id::AppId;
 use structs::InternalHost;
 
 mod msg;
-mod example_targets;
 mod config;
 mod errors;
 mod structs;
@@ -33,8 +32,8 @@ async fn main() -> Result<(), Box<dyn Error>>{
         }
     });
 
-    let targets = Arc::new(example_targets::get_examples());
     let config = Arc::new(config.clone());
+    let targets = Arc::new(config.clone().targets.clone());
 
     let make_service = 
         make_service_fn(|_conn: &AddrStream| {

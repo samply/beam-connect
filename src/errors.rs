@@ -1,7 +1,7 @@
 use std::{str::Utf8Error, string::FromUtf8Error};
 
 use hyper::Uri;
-use shared::beam_id::AppOrProxyId;
+use shared::{beam_id::AppOrProxyId,errors::SamplyBeamError};
 use thiserror::Error;
 
 #[derive(Error,Debug)]
@@ -26,7 +26,20 @@ pub(crate) enum BeamConnectError {
     ResponseNotValidUtf8String(#[from] FromUtf8Error),
     #[error("Reply invalid: {0}")]
     ReplyInvalid(String),
+    #[error("Invalid configuration file: {0}")]
+    InvalidConfiguration(String),
     // #[error("Unable to build reply: {0}")]
     // BuildReplyFailed(hyper::http::Error)
 }
 
+impl From<std::io::Error> for BeamConnectError {
+    fn from(e: std::io::Error) -> Self {
+        Self::InvalidConfiguration(e.to_string())
+    }
+}
+
+impl From<SamplyBeamError> for BeamConnectError {
+    fn from(e: SamplyBeamError) -> Self {
+        Self::InvalidConfiguration(e.to_string())
+    }
+}
