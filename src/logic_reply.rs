@@ -1,11 +1,13 @@
 use hyper::{Client, client::HttpConnector, Request, header, StatusCode, body, Response, Body};
+use hyper_proxy::ProxyConnector;
+use hyper_tls::HttpsConnector;
 use log::{info, warn, debug};
 use serde_json::Value;
 use shared::{MsgTaskRequest, MsgTaskResult, MsgId};
 
 use crate::{config::Config, errors::BeamConnectError, msg::{IsValidHttpTask, HttpResponse}};
 
-pub(crate) async fn process_requests(config: Config, client: client: Client<ProxyConnector<HttpsConnector<HttpConnector>>>,) -> Result<(), BeamConnectError> {
+pub(crate) async fn process_requests(config: Config, client: &Client<ProxyConnector<HttpsConnector<HttpConnector>>>,) -> Result<(), BeamConnectError> {
     // Fetch tasks from Proxy
     let msgs = fetch_requests(&config, &client).await?;
 
@@ -18,7 +20,7 @@ pub(crate) async fn process_requests(config: Config, client: client: Client<Prox
     Ok(())
 }
 
-async fn send_reply(task: &MsgTaskRequest, config: &Config, client: &client: Client<ProxyConnector<HttpsConnector<HttpConnector>>>,, mut resp: Response<Body>) -> Result<(), BeamConnectError> {
+async fn send_reply(task: &MsgTaskRequest, config: &Config, client: &Client<ProxyConnector<HttpsConnector<HttpConnector>>>, mut resp: Response<Body>) -> Result<(), BeamConnectError> {
     let body = body::to_bytes(resp.body_mut()).await
         .map_err(BeamConnectError::FailedToReadTargetsReply)?;
     let http_reply = HttpResponse {
@@ -50,7 +52,7 @@ async fn send_reply(task: &MsgTaskRequest, config: &Config, client: &client: Cli
     Ok(())
 }
 
-async fn execute_http_task(task: &MsgTaskRequest, client: &client: Client<ProxyConnector<HttpsConnector<HttpConnector>>>,) -> Result<Response<Body>, BeamConnectError> {
+async fn execute_http_task(task: &MsgTaskRequest, client: &Client<ProxyConnector<HttpsConnector<HttpConnector>>>,) -> Result<Response<Body>, BeamConnectError> {
     let task_req = task.http_request()?;
     info!("{} | {} {}", task.from, task_req.method, task_req.url);
     let mut req = Request::builder()
@@ -67,7 +69,7 @@ async fn execute_http_task(task: &MsgTaskRequest, client: &client: Client<ProxyC
     Ok(resp)
 }
 
-async fn fetch_requests(config: &Config, client: &client: Client<ProxyConnector<HttpsConnector<HttpConnector>>>,) -> Result<Vec<MsgTaskRequest>, BeamConnectError> {
+async fn fetch_requests(config: &Config, client: &Client<ProxyConnector<HttpsConnector<HttpConnector>>>,) -> Result<Vec<MsgTaskRequest>, BeamConnectError> {
     let req_to_proxy = Request::builder()
         .uri(format!("{}v1/tasks?to={}&poll_count=1&unanswered=true", config.proxy_url, config.my_app_id))
         .header(header::AUTHORIZATION, config.proxy_auth.clone())

@@ -2,6 +2,8 @@ use std::{net::SocketAddr, str::FromStr, convert::Infallible, string::FromUtf8Er
 
 use config::Config;
 use hyper::{body, Body, service::{service_fn, make_service_fn}, Request, Response, Server, header::{HeaderName, self, ToStrError}, Uri, http::uri::Authority, server::conn::AddrStream, Client, client::HttpConnector};
+use hyper_proxy::ProxyConnector;
+use hyper_tls::HttpsConnector;
 use log::{info, error, debug, warn};
 use shared::beam_id::AppId;
 use structs::InternalHost;
@@ -28,7 +30,7 @@ async fn main() -> Result<(), Box<dyn Error>>{
     let http_executor = tokio::task::spawn(async move {
         loop {
             debug!("Waiting for next request ...");
-            if let Err(e) = logic_reply::process_requests(config2.clone(), client2.clone()).await {
+            if let Err(e) = logic_reply::process_requests(config2.clone(), &client2.clone()).await {
                 warn!("Error in processing request: {e}. Will continue with the next one.");
             }
         }
@@ -66,7 +68,7 @@ async fn main() -> Result<(), Box<dyn Error>>{
 async fn handler_http_wrapper(
     req: Request<Body>,
     config: Arc<Config>,
-    client: Client<HttpConnector>,
+    client: Client<ProxyConnector<HttpsConnector<HttpConnector>>>,
     targets: Arc<HashMap<InternalHost, AppId>>
 ) -> Result<Response<Body>, Infallible> {
     match logic_ask::handler_http(req, config, client, targets).await {
