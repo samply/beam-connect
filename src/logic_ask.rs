@@ -1,6 +1,8 @@
 use std::{sync::Arc, collections::HashMap, str::FromStr};
 
 use hyper::{Request, Body, Client, client::HttpConnector, Response, header, StatusCode, body, Uri};
+use hyper_tls::HttpsConnector;
+use hyper_proxy::ProxyConnector;
 use log::{info, debug, warn, error};
 use serde_json::Value;
 use shared::{beam_id::AppId, MsgTaskResult, MsgTaskRequest};
@@ -13,7 +15,7 @@ use crate::{config::Config, structs::{InternalHost, MyStatusCode}, msg::{HttpReq
 pub(crate) async fn handler_http(
     mut req: Request<Body>,
     config: Arc<Config>,
-    client: Client<HttpConnector>,
+    client: Client<ProxyConnector<HttpsConnector<HttpConnector>>>,
     targets: Arc<HashMap<InternalHost, AppId>>
 ) -> Result<Response<Body>,MyStatusCode> {
     let method = req.method().to_owned();

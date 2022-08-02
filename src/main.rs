@@ -21,7 +21,8 @@ async fn main() -> Result<(), Box<dyn Error>>{
 
     let config = Config::load()?;
     let config2 = config.clone();
-    let client = hyper::Client::builder().build_http();
+    let client = shared::http_proxy::build_hyper_client(config.http_proxy.clone(), config.tls_ca_certificates.clone())?;
+    //let client = hyper::Client::builder().build_http();
     let client2 = client.clone();
 
     let http_executor = tokio::task::spawn(async move {

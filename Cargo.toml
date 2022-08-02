@@ -18,13 +18,17 @@ inherits = "release"
 strip = false
 
 [dependencies]
-shared = { git = "https://github.com/samply/beam", branch="develop" }
+shared = { git = "https://github.com/samply/beam", branch="feature/terminating-proxy" }
 
 #axum = "0.5.12"
 tokio = { version = "1", features = ["macros","rt-multi-thread","signal"] }
 hyper = { version = "0", features = ["server", "http1", "full"] }
 tower-http = { version = "0", features = ["trace"] }
 tower = "*"
+
+# HTTP client with proxy support
+hyper-tls = "0.5.0"
+hyper-proxy = "0.9.1"
 
 log = "*"
 pretty_env_logger = "*"
@@ -36,3 +40,4 @@ hyper_serde = "0.13"
 clap = {version = "3", features = ["derive"]}
 
 thiserror = "*"
+openssl = "0.10.41"
