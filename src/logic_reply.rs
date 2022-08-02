@@ -32,7 +32,7 @@ async fn send_reply(task: &MsgTaskRequest, config: &Config, client: &Client<Http
         from: config.my_app_id.clone().into(),
         to: vec![task.from.clone()],
         task: task.id,
-        result: shared::WorkResult::Succeeded(http_reply),
+        status: shared::WorkStatus::Succeeded(http_reply),
         metadata: Value::Null
     };
     let req_to_proxy = Request::builder()

@@ -102,9 +102,9 @@ pub(crate) async fn handler_http(
         error!("Reply had more than one answer (namely: {}). This should not happen; discarding request.", body.len());
         return Err(StatusCode::BAD_GATEWAY)?;
     }
-    let result = body.drain(0..1).next().unwrap().result;
+    let result = body.drain(0..1).next().unwrap().status;
     let response_inner = match result {
-        shared::WorkResult::Succeeded(b) => {
+        shared::WorkStatus::Succeeded(b) => {
             serde_json::from_str::<HttpResponse>(&b)?
         },
         e => {
