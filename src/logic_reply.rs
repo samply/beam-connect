@@ -30,7 +30,6 @@ async fn send_reply(task: &MsgTaskRequest, config: &Config, client: &Client<Prox
     };
     let http_reply = serde_json::to_string(&http_reply)?;
     let msg = MsgTaskResult {
-        id: MsgId::new(),
         from: config.my_app_id.clone().into(),
         to: vec![task.from.clone()],
         task: task.id,
