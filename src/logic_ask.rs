@@ -62,7 +62,7 @@ pub(crate) async fn handler_http(
     let results_uri = Uri::builder()
         .scheme(config.proxy_url.scheme().unwrap().as_str())
         .authority(config.proxy_url.authority().unwrap().to_owned())
-        .path_and_query(format!("{}/results?poll_count=1&poll_timeout=10000", location.path()))
+        .path_and_query(format!("{}/results?wait_count=1&wait_timeout=10000", location.path()))
         .build().unwrap(); // TODO
     debug!("Fetching reply from Proxy: {results_uri}");
     let req = Request::builder()

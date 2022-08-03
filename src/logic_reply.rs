@@ -28,7 +28,6 @@ async fn send_reply(task: &MsgTaskRequest, config: &Config, client: &Client<Http
     };
     let http_reply = serde_json::to_string(&http_reply)?;
     let msg = MsgTaskResult {
-        id: MsgId::new(),
         from: config.my_app_id.clone().into(),
         to: vec![task.from.clone()],
         task: task.id,
@@ -37,7 +36,7 @@ async fn send_reply(task: &MsgTaskRequest, config: &Config, client: &Client<Http
     };
     let req_to_proxy = Request::builder()
         .method("POST")
-        .uri(format!("{}v1/tasks/{}/results", config.proxy_url, task.id))
+        .uri(format!("{}v1/tasks/{}/results/{}", config.proxy_url, task.id,config.my_app_id.clone()))
         .header(header::AUTHORIZATION, config.proxy_auth.clone())
         .body(body::Body::from(serde_json::to_vec(&msg)?))
         .map_err( BeamConnectError::HyperBuildError)?;
@@ -69,7 +68,7 @@ async fn execute_http_task(task: &MsgTaskRequest, client: &Client<HttpConnector>
 
 async fn fetch_requests(config: &Config, client: &Client<HttpConnector>) -> Result<Vec<MsgTaskRequest>, BeamConnectError> {
     let req_to_proxy = Request::builder()
-        .uri(format!("{}v1/tasks?to={}&poll_count=1&unanswered=true", config.proxy_url, config.my_app_id))
+        .uri(format!("{}v1/tasks?to={}&wait_count=1&filter=todo", config.proxy_url, config.my_app_id))
         .header(header::AUTHORIZATION, config.proxy_auth.clone())
         .body(body::Body::empty())
         .map_err(BeamConnectError::HyperBuildError)?;
