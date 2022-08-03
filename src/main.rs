@@ -17,10 +17,10 @@ mod logic_reply;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>>{
     pretty_env_logger::init();
-    let listen = SocketAddr::from_str("0.0.0.0:8082").unwrap();
 
     let config = Config::load()?;
     let config2 = config.clone();
+    let listen = SocketAddr::from_str(&config2.bind_addr).unwrap();
     let client = hyper::Client::builder().build_http();
     let client2 = client.clone();
 

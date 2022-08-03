@@ -35,7 +35,7 @@ async fn send_reply(task: &MsgTaskRequest, config: &Config, client: &Client<Http
         metadata: Value::Null
     };
     let req_to_proxy = Request::builder()
-        .method("POST")
+        .method("PUT")
         .uri(format!("{}v1/tasks/{}/results/{}", config.proxy_url, task.id,config.my_app_id.clone()))
         .header(header::AUTHORIZATION, config.proxy_auth.clone())
         .body(body::Body::from(serde_json::to_vec(&msg)?))

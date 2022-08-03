@@ -40,6 +40,10 @@ struct CliArgs {
     #[clap(long, env, value_parser)]
     proxy_apikey: String,
 
+    /// Bind address
+    #[clap(long, env, value_parser, default_value = "0.0.0.0:8062")]
+    bind_addr: String,
+
     // /// (included for technical reasons)
     // #[clap(long, env, value_parser)]
     // proxy_id: Option<String>,
@@ -59,6 +63,7 @@ pub(crate) struct Config {
     pub(crate) proxy_url: Uri,
     pub(crate) my_app_id: AppId,
     pub(crate) proxy_auth: String,
+    pub(crate) bind_addr: String,
     // pub(crate) pki_address: Uri,
     // pub(crate) pki_realm: String,
     // pub(crate) pki_apikey: String,
@@ -84,6 +89,7 @@ impl Config {
             proxy_url: args.proxy_url,
             my_app_id: my_app_id.clone(),
             proxy_auth: format!("ApiKey {} {}", my_app_id, args.proxy_apikey),
+            bind_addr: args.bind_addr,
         })
     }
 }
