@@ -1,8 +1,10 @@
-use std::error::Error;
+use std::{error::Error, collections::HashMap};
 
 use clap::Parser;
-use hyper::Uri;
+use hyper::{Uri, http::uri::Authority};
 use shared::beam_id::{AppId, BeamId};
+
+use crate::{example_targets};
 
 /// Settings for Samply.Beam (Shared)
 #[derive(Parser,Debug)]
@@ -57,6 +59,20 @@ struct CliArgs {
     // test_threads: Option<String>
 }
 
+type UrlBeginning = String;
+
+#[derive(Clone)]
+pub(crate) struct CentralMapping {
+    pub(crate) map: HashMap<Authority, AppId>
+}
+
+#[derive(Clone)]
+pub(crate) struct LocalMappingEntry {
+    pub(crate) needle: Authority, // Host part of URL
+    pub(crate) replace: Authority,
+    pub(crate) allowed: Vec<AppId>
+}
+
 #[derive(Clone)]
 #[allow(dead_code)]
 pub(crate) struct Config {
@@ -64,6 +80,8 @@ pub(crate) struct Config {
     pub(crate) my_app_id: AppId,
     pub(crate) proxy_auth: String,
     pub(crate) bind_addr: String,
+    pub(crate) targets_local: Vec<LocalMappingEntry>,
+    pub(crate) targets_public: CentralMapping,
     // pub(crate) pki_address: Uri,
     // pub(crate) pki_realm: String,
     // pub(crate) pki_apikey: String,
@@ -72,6 +90,14 @@ pub(crate) struct Config {
     // pub(crate) http_proxy: Option<Uri>,
     // // pub(crate) broker_url: Uri,
     // pub(crate) broker_domain: String,
+}
+
+fn load_local_targets() -> Vec<LocalMappingEntry> {
+    example_targets::example_local() //TODO: Read from env, file, etc.
+}
+
+fn load_public_targets() -> CentralMapping {
+    example_targets::example_central() //TODO: Read from env, file, etc.
 }
 
 impl Config {
@@ -90,6 +116,9 @@ impl Config {
             my_app_id: my_app_id.clone(),
             proxy_auth: format!("ApiKey {} {}", my_app_id, args.proxy_apikey),
             bind_addr: args.bind_addr,
+            targets_local: load_local_targets(),
+            targets_public: load_public_targets()
         })
     }
 }
+

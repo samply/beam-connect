@@ -3,8 +3,6 @@ use std::{net::SocketAddr, str::FromStr, convert::Infallible, string::FromUtf8Er
 use config::Config;
 use hyper::{body, Body, service::{service_fn, make_service_fn}, Request, Response, Server, header::{HeaderName, self, ToStrError}, Uri, http::uri::Authority, server::conn::AddrStream, Client, client::HttpConnector};
 use log::{info, error, debug, warn};
-use shared::beam_id::AppId;
-use structs::InternalHost;
 
 mod msg;
 mod example_targets;
@@ -33,18 +31,16 @@ async fn main() -> Result<(), Box<dyn Error>>{
         }
     });
 
-    let targets = Arc::new(example_targets::get_examples());
     let config = Arc::new(config.clone());
 
     let make_service = 
         make_service_fn(|_conn: &AddrStream| {
             // let remote_addr = conn.remote_addr();
             let client = client.clone();
-            let targets = targets.clone();
             let config = config.clone();
             async {
                 Ok::<_, Infallible>(service_fn(move |req|
-                    handler_http_wrapper(req, config.clone(), client.clone(), targets.clone())))
+                    handler_http_wrapper(req, config.clone(), client.clone())))
             }
     });
 
@@ -65,10 +61,9 @@ async fn main() -> Result<(), Box<dyn Error>>{
 async fn handler_http_wrapper(
     req: Request<Body>,
     config: Arc<Config>,
-    client: Client<HttpConnector>,
-    targets: Arc<HashMap<InternalHost, AppId>>
+    client: Client<HttpConnector>
 ) -> Result<Response<Body>, Infallible> {
-    match logic_ask::handler_http(req, config, client, targets).await {
+    match logic_ask::handler_http(req, config, client).await {
         Ok(e) => Ok(e),
         Err(e) => Ok(Response::builder().status(e.code).body(body::Body::empty()).unwrap()),
     }
