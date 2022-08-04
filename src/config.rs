@@ -2,7 +2,7 @@ use std::{error::Error, collections::HashMap};
 
 use clap::Parser;
 use hyper::{Uri, http::uri::Authority};
-use shared::beam_id::{AppId, BeamId};
+use shared::beam_id::{AppId, BeamId, app_to_broker_id, BrokerId};
 
 use crate::{example_targets};
 
@@ -92,12 +92,12 @@ pub(crate) struct Config {
     // pub(crate) broker_domain: String,
 }
 
-fn load_local_targets() -> Vec<LocalMappingEntry> {
-    example_targets::example_local() //TODO: Read from env, file, etc.
+fn load_local_targets(broker_id: &BrokerId) -> Vec<LocalMappingEntry> {
+    example_targets::example_local(broker_id) //TODO: Read from env, file, etc.
 }
 
-fn load_public_targets() -> CentralMapping {
-    example_targets::example_central() //TODO: Read from env, file, etc.
+fn load_public_targets(broker_id: &BrokerId) -> CentralMapping {
+    example_targets::example_central(broker_id) //TODO: Read from env, file, etc.
 }
 
 impl Config {
@@ -107,8 +107,10 @@ impl Config {
         //     debug!("Setting {}", key);
         // }
         let args = CliArgs::parse();
-        AppId::set_broker_id(shared::beam_id::app_to_broker_id(&args.app_id)?);
+        let broker_id = app_to_broker_id(&args.app_id)?;
+        AppId::set_broker_id(&broker_id);
         let my_app_id = AppId::new(&args.app_id)?;
+        let broker_id = BrokerId::new(&broker_id)?;
         // let proxy_id = my_app_id.proxy_id();
 
         Ok(Config {
@@ -116,8 +118,8 @@ impl Config {
             my_app_id: my_app_id.clone(),
             proxy_auth: format!("ApiKey {} {}", my_app_id, args.proxy_apikey),
             bind_addr: args.bind_addr,
-            targets_local: load_local_targets(),
-            targets_public: load_public_targets()
+            targets_local: load_local_targets(&broker_id),
+            targets_public: load_public_targets(&broker_id)
         })
     }
 }
