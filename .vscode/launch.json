@@ -25,7 +25,8 @@
                 "RUST_LOG": "tracing=info,hyper=info,debug",
                 "APP_ID": "connect1.proxy23.localhost",
                 "PROXY_APIKEY": "Connect1Secret",
-                "PROXY_URL": "http://localhost:8081"
+                "PROXY_URL": "http://localhost:8081",
+                "DISCOVERY_URL": "PUT_VALID_URL_HERE"
             }
         },
         {

@@ -2,6 +2,8 @@ use std::{net::SocketAddr, str::FromStr, convert::Infallible, string::FromUtf8Er
 
 use config::Config;
 use hyper::{body, Body, service::{service_fn, make_service_fn}, Request, Response, Server, header::{HeaderName, self, ToStrError}, Uri, http::uri::Authority, server::conn::AddrStream, Client, client::HttpConnector};
+use hyper_proxy::ProxyConnector;
+use hyper_tls::HttpsConnector;
 use log::{info, error, debug, warn};
 
 mod msg;
@@ -16,11 +18,13 @@ mod logic_reply;
 async fn main() -> Result<(), Box<dyn Error>>{
     pretty_env_logger::init();
 
-    let config = Config::load()?;
+    let config = Config::load().await?;
     let config2 = config.clone();
     let listen = SocketAddr::from_str(&config2.bind_addr).unwrap();
-    let client = hyper::Client::builder().build_http();
+    let client = config.client.clone();
     let client2 = client.clone();
+
+    info!("Global site discovery: {:?}", config.targets_public);
 
     let http_executor = tokio::task::spawn(async move {
         loop {
@@ -61,7 +65,7 @@ async fn main() -> Result<(), Box<dyn Error>>{
 async fn handler_http_wrapper(
     req: Request<Body>,
     config: Arc<Config>,
-    client: Client<HttpConnector>
+    client: Client<ProxyConnector<HttpsConnector<HttpConnector>>>
 ) -> Result<Response<Body>, Infallible> {
     match logic_ask::handler_http(req, config, client).await {
         Ok(e) => Ok(e),
