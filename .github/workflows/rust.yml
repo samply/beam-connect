@@ -89,7 +89,7 @@ jobs:
 
     steps:
       - name: Not implemented
-        run: echo "This will be implemented soon"
+        run: echo "This will be implemented soonish"
 
   docker:
     needs: [ build-rust, pre-check, test ]
