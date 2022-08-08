@@ -114,7 +114,6 @@ jobs:
       # build-platforms: "linux/amd64,linux/arm64"
       # If your actions generate an artifact in a previous build step, you can tell this workflow to download it
       artifact-name: '*'
-      security-scan: false
     # This passes the secrets from calling workflow to the called workflow
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
