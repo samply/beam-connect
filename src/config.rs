@@ -32,6 +32,10 @@ struct CliArgs {
     #[clap(long, env, value_parser)]
     discovery_url: Uri,
 
+    /// JSON String of the local target configuration
+    #[clap(long, env, value_parser)]
+    local_target_json: Option<String>,
+
     /// Outgoing HTTP proxy: Directory with CA certificates to trust for TLS connections (e.g. /etc/samply/cacerts/)
     #[clap(long, env, value_parser)]
     tls_ca_certificates_dir: Option<PathBuf>,
@@ -85,9 +89,76 @@ impl<'de> Visitor<'de> for AuthorityVisitor {
     }
 }
 
+
+#[derive(Clone,Deserialize,Debug)]
+pub(crate) struct LocalMappingEntry {
+    #[serde(deserialize_with = "deserialize_authority", rename="external")]
+    pub(crate) needle: Authority, // Host part of URL
+    #[serde(deserialize_with = "deserialize_authority", rename="internal")]
+    pub(crate) replace: Authority,
+    pub(crate) allowed: Vec<AppId>
+}
+
+#[derive(Clone)]
+#[allow(dead_code)]
+pub(crate) struct Config {
+    pub(crate) proxy_url: Uri,
+    pub(crate) my_app_id: AppId,
+    pub(crate) proxy_auth: String,
+    pub(crate) bind_addr: String,
+    pub(crate) targets_local: Vec<LocalMappingEntry>,
+    pub(crate) targets_public: CentralMapping,
+    pub(crate) client: Client<ProxyConnector<HttpsConnector<HttpConnector>>>
+}
+
+fn load_local_targets(broker_id: &BrokerId, local_target_json: &Option<String>) -> Result<Vec<LocalMappingEntry>,Box<dyn Error>> {
+    if let Some(json_string) = local_target_json {
+        Ok(serde_json::from_str::<Vec<LocalMappingEntry>>(&json_string)?)
+    } else {
+        Ok(example_targets::example_local(broker_id)) //TODO: Read from env, file, etc
+    }
+}
+
+async fn load_public_targets(client: &Client<ProxyConnector<HttpsConnector<HttpConnector>>>, url: &Uri) -> Result<CentralMapping,Box<dyn Error>> {
+    let mut response = client.get(url.clone()).await?;
+    let body = response.body_mut();
+    let bytes = hyper::body::to_bytes(body).await?;
+    let deserialized = serde_json::from_slice::<CentralMapping>(&bytes)?;
+    Ok(deserialized)
+}
+
+impl Config {
+    pub(crate) async fn load() -> Result<Self,Box<dyn Error>> {
+        let args = CliArgs::parse();
+        let broker_id = app_to_broker_id(&args.app_id)?;
+        AppId::set_broker_id(&broker_id);
+        let my_app_id = AppId::new(&args.app_id)?;
+        let broker_id = BrokerId::new(&broker_id)?;
+
+        let tls_ca_certificates = shared::crypto::load_certificates_from_dir(args.tls_ca_certificates_dir)?;
+        let client = build_hyper_client(tls_ca_certificates)?;
+
+        let targets_public = load_public_targets(&client, &args.discovery_url).await?;
+        let targets_local = load_local_targets(&broker_id, &args.local_target_json)?;
+
+        Ok(Config {
+            proxy_url: args.proxy_url,
+            my_app_id: my_app_id.clone(),
+            proxy_auth: format!("ApiKey {} {}", my_app_id, args.proxy_apikey),
+            bind_addr: args.bind_addr,
+            targets_local,
+            targets_public,
+            client
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::CentralMapping;
+    use super::LocalMappingEntry;
+    use crate::example_targets::example_local;
+    use shared::beam_id::{BrokerId,BeamId,app_to_broker_id};
 
     #[test]
     fn serde_authority() {
@@ -131,61 +202,26 @@ mod tests {
         assert_eq!(site.virtualhost, "ukfr.virtual");
         assert_eq!(site.beamconnect.to_string(), "connect.ukfr-proxy.broker.ccp-it.dktk.dkfz.de");
     }
-}
 
-#[derive(Clone)]
-pub(crate) struct LocalMappingEntry {
-    pub(crate) needle: Authority, // Host part of URL
-    pub(crate) replace: Authority,
-    pub(crate) allowed: Vec<AppId>
-}
+    #[test]
+    fn local_target_configuration() {
+        let broker_id = app_to_broker_id("foo.bar.broker.example").unwrap();
+        BrokerId::set_broker_id(&broker_id);
+        let broker_id = BrokerId::new(&broker_id).unwrap();
+        let serialized = r#"[
+            {"external": "ifconfig.me","internal":"ifconfig.me","allowed":["connect1.proxy23.broker.example","connect2.proxy23.broker.example"]},
+            {"external": "ip-api.com","internal":"ip-api.com","allowed":["connect1.proxy23.broker.example","connect2.proxy23.broker.example"]},
+            {"external": "wttr.in","internal":"wttr.in","allowed":["connect1.proxy23.broker.example","connect2.proxy23.broker.example"]},
+            {"external": "node23.uk12.network","internal":"host23.internal.network","allowed":["connect1.proxy23.broker.example","connect2.proxy23.broker.example"]}
+        ]"#;
+        let obj: Vec<LocalMappingEntry> = serde_json::from_str(serialized).unwrap();
+        let expect = example_local(&broker_id);
+        assert_eq!(obj.len(), expect.len());
 
-#[derive(Clone)]
-#[allow(dead_code)]
-pub(crate) struct Config {
-    pub(crate) proxy_url: Uri,
-    pub(crate) my_app_id: AppId,
-    pub(crate) proxy_auth: String,
-    pub(crate) bind_addr: String,
-    pub(crate) targets_local: Vec<LocalMappingEntry>,
-    pub(crate) targets_public: CentralMapping,
-    pub(crate) client: Client<ProxyConnector<HttpsConnector<HttpConnector>>>
-}
-
-fn load_local_targets(broker_id: &BrokerId) -> Vec<LocalMappingEntry> {
-    example_targets::example_local(broker_id) //TODO: Read from env, file, etc.
-}
-
-async fn load_public_targets(client: &Client<ProxyConnector<HttpsConnector<HttpConnector>>>, url: &Uri) -> Result<CentralMapping,Box<dyn Error>> {
-    let mut response = client.get(url.clone()).await?;
-    let body = response.body_mut();
-    let bytes = hyper::body::to_bytes(body).await?;
-    let deserialized = serde_json::from_slice::<CentralMapping>(&bytes)?;
-    Ok(deserialized)
-}
-
-impl Config {
-    pub(crate) async fn load() -> Result<Self,Box<dyn Error>> {
-        let args = CliArgs::parse();
-        let broker_id = app_to_broker_id(&args.app_id)?;
-        AppId::set_broker_id(&broker_id);
-        let my_app_id = AppId::new(&args.app_id)?;
-        let broker_id = BrokerId::new(&broker_id)?;
-
-        let tls_ca_certificates = shared::crypto::load_certificates_from_dir(args.tls_ca_certificates_dir)?;
-        let client = build_hyper_client(tls_ca_certificates)?;
-
-        let targets_public = load_public_targets(&client, &args.discovery_url).await?;
-
-        Ok(Config {
-            proxy_url: args.proxy_url,
-            my_app_id: my_app_id.clone(),
-            proxy_auth: format!("ApiKey {} {}", my_app_id, args.proxy_apikey),
-            bind_addr: args.bind_addr,
-            targets_local: load_local_targets(&broker_id),
-            targets_public,
-            client
-        })
+        for (entry,ref_entry) in obj.iter().zip(expect.iter()) {
+            assert_eq!(entry.needle,ref_entry.needle);
+            assert_eq!(entry.replace,ref_entry.replace);
+            assert_eq!(entry.allowed,ref_entry.allowed);
+        }
     }
 }
-
