@@ -25,6 +25,7 @@ async fn main() -> Result<(), Box<dyn Error>>{
     let client2 = client.clone();
 
     info!("Global site discovery: {:?}", config.targets_public);
+    info!("Local site Access: {:?}", config.targets_local);
 
     let http_executor = tokio::task::spawn(async move {
         loop {

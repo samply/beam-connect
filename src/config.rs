@@ -32,9 +32,9 @@ struct CliArgs {
     #[clap(long, env, value_parser)]
     discovery_url: Uri,
 
-    /// JSON String of the local target configuration
+    /// Path of the local target configuration.
     #[clap(long, env, value_parser)]
-    local_target_json: Option<String>,
+    local_targets_file: Option<PathBuf>,
 
     /// Outgoing HTTP proxy: Directory with CA certificates to trust for TLS connections (e.g. /etc/samply/cacerts/)
     #[clap(long, env, value_parser)]
@@ -111,12 +111,14 @@ pub(crate) struct Config {
     pub(crate) client: Client<ProxyConnector<HttpsConnector<HttpConnector>>>
 }
 
-fn load_local_targets(broker_id: &BrokerId, local_target_json: &Option<String>) -> Result<Vec<LocalMappingEntry>,Box<dyn Error>> {
-    if let Some(json_string) = local_target_json {
-        Ok(serde_json::from_str::<Vec<LocalMappingEntry>>(&json_string)?)
-    } else {
-        Ok(example_targets::example_local(broker_id)) //TODO: Read from env, file, etc
+fn load_local_targets(broker_id: &BrokerId, local_target_path: &Option<PathBuf>) -> Result<Vec<LocalMappingEntry>,Box<dyn Error>> {
+    if let Some(json_file) = local_target_path {
+        if json_file.exists() {
+            let json_string = std::fs::read_to_string(json_file)?;
+            return Ok(serde_json::from_str::<Vec<LocalMappingEntry>>(&json_string)?);
+        }
     }
+    Ok(example_targets::example_local(broker_id))
 }
 
 async fn load_public_targets(client: &Client<ProxyConnector<HttpsConnector<HttpConnector>>>, url: &Uri) -> Result<CentralMapping,Box<dyn Error>> {
@@ -139,7 +141,7 @@ impl Config {
         let client = build_hyper_client(tls_ca_certificates)?;
 
         let targets_public = load_public_targets(&client, &args.discovery_url).await?;
-        let targets_local = load_local_targets(&broker_id, &args.local_target_json)?;
+        let targets_local = load_local_targets(&broker_id, &args.local_targets_file)?;
 
         Ok(Config {
             proxy_url: args.proxy_url,
