@@ -130,7 +130,7 @@ fn load_local_targets(broker_id: &BrokerId, local_target_path: &Option<PathBuf>)
     if let Some(json_file) = local_target_path {
         if json_file.exists() {
             let json_string = std::fs::read_to_string(json_file)?;
-            return Ok(serde_json::from_str::<LocalMapping>(&json_string)?);
+            return Ok(LocalMapping{entries:serde_json::from_str(&json_string)?});
         }
     }
     Ok(example_targets::example_local(broker_id))
@@ -173,7 +173,7 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::CentralMapping;
-    use super::LocalMappingEntry;
+    use super::LocalMapping;
     use crate::example_targets::example_local;
     use shared::beam_id::{BrokerId,BeamId,app_to_broker_id};
 
@@ -231,11 +231,11 @@ mod tests {
             {"external": "wttr.in","internal":"wttr.in","allowed":["connect1.proxy23.broker.example","connect2.proxy23.broker.example"]},
             {"external": "node23.uk12.network","internal":"host23.internal.network","allowed":["connect1.proxy23.broker.example","connect2.proxy23.broker.example"]}
         ]"#;
-        let obj: LocalMapping = serde_json::from_str(serialized).unwrap();
+        let obj: LocalMapping = LocalMapping{entries:serde_json::from_str(serialized).unwrap()};
         let expect = example_local(&broker_id);
-        assert_eq!(obj.len(), expect.len());
+        assert_eq!(obj.entries.len(), expect.entries.len());
 
-        for (entry,ref_entry) in obj.entries.iter().zip(expect.iter()) {
+        for (entry,ref_entry) in obj.entries.iter().zip(expect.entries.iter()) {
             assert_eq!(entry.needle,ref_entry.needle);
             assert_eq!(entry.replace,ref_entry.replace);
             assert_eq!(entry.allowed,ref_entry.allowed);
