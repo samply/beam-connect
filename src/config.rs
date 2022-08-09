@@ -7,7 +7,7 @@ use hyper_tls::HttpsConnector;
 use serde::{Deserialize, Deserializer, de::Visitor};
 use shared::{beam_id::{AppId, BeamId, app_to_broker_id, BrokerId}, http_proxy::build_hyper_client};
 
-use crate::{example_targets};
+use crate::{example_targets, errors::BeamConnectError};
 
 /// Settings for Samply.Beam (Shared)
 #[derive(Parser,Debug)]
@@ -91,6 +91,21 @@ impl<'de> Visitor<'de> for AuthorityVisitor {
 
 
 #[derive(Clone,Deserialize,Debug)]
+pub(crate) struct LocalMapping {
+    pub(crate) entries: Vec<LocalMappingEntry>
+}
+impl LocalMapping {
+    pub(crate) fn get(&self, auth: &Authority) -> Option<LocalMappingEntry> {
+        for entry in &self.entries {
+            if entry.needle == *auth {
+                return Some(entry.clone())
+            }
+        }
+        return None
+    }
+}
+
+#[derive(Clone,Deserialize,Debug)]
 pub(crate) struct LocalMappingEntry {
     #[serde(deserialize_with = "deserialize_authority", rename="external")]
     pub(crate) needle: Authority, // Host part of URL
@@ -106,26 +121,26 @@ pub(crate) struct Config {
     pub(crate) my_app_id: AppId,
     pub(crate) proxy_auth: String,
     pub(crate) bind_addr: String,
-    pub(crate) targets_local: Vec<LocalMappingEntry>,
+    pub(crate) targets_local: LocalMapping,
     pub(crate) targets_public: CentralMapping,
     pub(crate) client: Client<ProxyConnector<HttpsConnector<HttpConnector>>>
 }
 
-fn load_local_targets(broker_id: &BrokerId, local_target_path: &Option<PathBuf>) -> Result<Vec<LocalMappingEntry>,Box<dyn Error>> {
+fn load_local_targets(broker_id: &BrokerId, local_target_path: &Option<PathBuf>) -> Result<LocalMapping,Box<dyn Error>> {
     if let Some(json_file) = local_target_path {
         if json_file.exists() {
             let json_string = std::fs::read_to_string(json_file)?;
-            return Ok(serde_json::from_str::<Vec<LocalMappingEntry>>(&json_string)?);
+            return Ok(serde_json::from_str::<LocalMapping>(&json_string)?);
         }
     }
     Ok(example_targets::example_local(broker_id))
 }
 
-async fn load_public_targets(client: &Client<ProxyConnector<HttpsConnector<HttpConnector>>>, url: &Uri) -> Result<CentralMapping,Box<dyn Error>> {
-    let mut response = client.get(url.clone()).await?;
+async fn load_public_targets(client: &Client<ProxyConnector<HttpsConnector<HttpConnector>>>, url: &Uri) -> Result<CentralMapping,BeamConnectError> {
+    let mut response = client.get(url.clone()).await.map_err(|e| BeamConnectError::ConfigurationError(format!("Cannot retreive central service discovery configuration: {}",e)))?;
     let body = response.body_mut();
-    let bytes = hyper::body::to_bytes(body).await?;
-    let deserialized = serde_json::from_slice::<CentralMapping>(&bytes)?;
+    let bytes = hyper::body::to_bytes(body).await.map_err(|e|BeamConnectError::ConfigurationError(format!("Invalid central site discovery response: {}",e)))?;
+    let deserialized = serde_json::from_slice::<CentralMapping>(&bytes).map_err(|e|BeamConnectError::ConfigurationError(format!("Cannot parse central service discovery configuration: {}", e)))?;
     Ok(deserialized)
 }
 
@@ -216,11 +231,11 @@ mod tests {
             {"external": "wttr.in","internal":"wttr.in","allowed":["connect1.proxy23.broker.example","connect2.proxy23.broker.example"]},
             {"external": "node23.uk12.network","internal":"host23.internal.network","allowed":["connect1.proxy23.broker.example","connect2.proxy23.broker.example"]}
         ]"#;
-        let obj: Vec<LocalMappingEntry> = serde_json::from_str(serialized).unwrap();
+        let obj: LocalMapping = serde_json::from_str(serialized).unwrap();
         let expect = example_local(&broker_id);
         assert_eq!(obj.len(), expect.len());
 
-        for (entry,ref_entry) in obj.iter().zip(expect.iter()) {
+        for (entry,ref_entry) in obj.entries.iter().zip(expect.iter()) {
             assert_eq!(entry.needle,ref_entry.needle);
             assert_eq!(entry.replace,ref_entry.replace);
             assert_eq!(entry.allowed,ref_entry.allowed);

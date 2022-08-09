@@ -33,15 +33,15 @@ cargo build --release
 Change into the binary folder (by default after building `./target/release`) and start
 Samply.Beam.Connect with
 ```bash
-./connect --proxy-url <PROXY_URL> --app-id <APP_ID> (--proxy-apikey <PROXY_APIKEY>)
+./connect --proxy-url <PROXY_URL> --app-id <APP_ID> --local-targets-file <LOCAL_TARGETS_FILE> --discovery-url <DISCOVERY_URL> (--proxy-apikey <PROXY_APIKEY>) (--bind-addr 0.0.0.0:8062)
 ```
 The following command line parameters are required:
- * `PROXY_URL`: The URL of the local Samply.Proxy which is used to connect to
-   the Samply.Broker
- * `APP_ID`: The BeamId of the Beam.Connect application
-The following command line parameter is only used in Receiver mode:
- * `PROXY_APIKEY`: In Receiver Mode, the API key with which this Beam.Connector is registered for listening at
-   the Samply.Broker
+ * `PROXY_URL`: The URL of the local Samply.Proxy which is used to connect to the Samply.Broker
+ * `APP_ID`: The BeamId of the Beam.Connect application The following command line parameter is only used in Receiver mode:
+ * `PROXY_APIKEY`: In Receiver Mode, the API key with which this Beam.Connector is registered for listening at the Samply.Broker
+ * `LOCAL_TARGETS_FILE`: The path to the local service resolution file.
+ * `DISCOVERY_URL`: The URL that is queried to receive the central service discovery.
+ * `BIND_ADDR`: The interface and port Beam.Connect is listening on. Defaults to `0.0.0.0:8062`.
 All parameters can be given as environment variables instead.
 
 
@@ -55,17 +55,20 @@ Run the container while providing the same parameters as
 ```bash
 docker run -e PROXY_URL='<Proxy_url>' \
            -e APP_ID='<App_Id>' \
+           -e LOCAL_TARGETS_FILE='<Local_Targets_File>' \
+           -e DISCOVERY_URL='<Discovery_Url>' \
            -e PROXY_APIKEY='<API_Key>' \
+           -e BIND_ADDR='<Bind_Address>' \
            samply/beam-connect
 ```
 Again, the last environment variable `PROXY_APIKEY` is only required for usage
-in Receiver Mode.
+in Receiver Mode. `BIND_ADDR` is optional and defaults to `0.0.0.0:8062`.
 
 ### Use Beam.Connect to forward a HTTP request
 We give an example [cURL](https://curl.se/) request showing the usage of
 Beam.Connect:
 ```bash
-curl -x http://localbeamconnect:8081 -H "Proxy-Authorization: ApiKey connect1.proxy23.localhost Connect1Secret" -H "Authorization: basic YWxhZGRpbjpvcGVuc2VzYW1l" http://ip-api.com/json
+curl -x http://localbeamconnect:8081 -H "Proxy-Authorization: ApiKey connect1.proxy23.localhost Connect1Secret" -H "Authorization: basic YWxhZGRpbjpvcGVuc2VzYW1l" http://uk23.virtual/json
 ```
 
 The parameter `-x http://localbeamconnect:8081` instructs cURL to use
@@ -79,10 +82,13 @@ The `-H "Authorization: basic
 YWxhZGRpbjpvcGVuc2VzYW1l"` header will be forwarded unmodified to the intended
 resource.
 
-Finally, `http://ip.api.com/json` is the requested resource.
+Finally, `http://uk23.virtual/json` is the requested resource.
 
 A configurable mapping between requested resource and Beam.AppId must be
-provided for routing the messages.
+provided for routing the messages. This is done, first, with the central service
+discovery, that maps the HTTP authority part (`uk23.virtual` in the example) to
+the intended Beam.AppId. On the receiving side, the same authority is
+subsequently replaced by an internal host name provided in the local targets file.
 
 A mishap in communication will be returned as appropriate HTTP replies.
 

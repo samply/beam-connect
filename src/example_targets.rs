@@ -1,7 +1,7 @@
 use hyper::http::uri::Authority;
 use shared::beam_id::{AppId, BeamId, BrokerId, ProxyId};
 
-use crate::config::{CentralMapping, LocalMappingEntry};
+use crate::config::{CentralMapping, LocalMapping, LocalMappingEntry};
 
 // pub(crate) fn example_central(broker_id: &BrokerId) -> CentralMapping {
 //     let proxy23 = ProxyId::new(&format!("proxy23.{}", broker_id)).unwrap();
@@ -19,11 +19,11 @@ use crate::config::{CentralMapping, LocalMappingEntry};
 //     CentralMapping { routes }
 // }
 
-pub(crate) fn example_local(broker_id: &BrokerId) -> Vec<LocalMappingEntry> {
+pub(crate) fn example_local(broker_id: &BrokerId) -> LocalMapping {
     let proxy23 = ProxyId::new(&format!("proxy23.{}", broker_id)).unwrap();
     let app1_id = AppId::new(&format!("connect1.{}",proxy23)).unwrap();
     let app2_id = AppId::new(&format!("connect2.{}",proxy23)).unwrap();
-    let map = [
+    let map = LocalMapping {entries: [
         ("ifconfig.me", "ifconfig.me", vec![app1_id.clone(), app2_id.clone()]),
         ("ip-api.com", "ip-api.com", vec![app1_id.clone(), app2_id.clone()]),
         ("wttr.in", "wttr.in", vec![app1_id.clone(), app2_id.clone()]),
@@ -34,7 +34,6 @@ pub(crate) fn example_local(broker_id: &BrokerId) -> Vec<LocalMappingEntry> {
         allowed
     })
     .into_iter()
-    .collect();
-
+    .collect()};
     map
 }
