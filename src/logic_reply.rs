@@ -56,7 +56,7 @@ async fn execute_http_task(task: &MsgTaskRequest, config: &Config, client: &Clie
     info!("{} | {} {}", task.from, task_req.method, task_req.url);
     let target = config.targets_local.get(task_req.url.authority().unwrap()) //TODO unwrap
         .ok_or(BeamConnectError::CommunicationWithTargetFailed(String::from("Target not defined")))?;
-    if !target.allowed.contains(&AppId::new(&task.from.value()).unwrap()) { // FIXME
+    if !target.allowed.contains(&AppId::try_from(&task.from).or(Err(BeamConnectError::IdNotAuthorizedToAccessUrl(task.from.clone(), task_req.url.clone())))?) {
         return Err(BeamConnectError::IdNotAuthorizedToAccessUrl(task.from.clone(), task_req.url.clone()));
     }
     let uri = Uri::builder()
