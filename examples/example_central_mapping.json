@@ -1,0 +1,22 @@
+{
+  "sites":[
+    {
+      "id":"UK1",
+      "name":"UniversityClinic1",
+      "virtualhost": "uk1.virtual",
+      "beamconnect": "connect.uk1.broker.example"
+    },
+    {
+      "id":"UK2",
+      "name":"UniversityClinic2",
+      "virtualhost": "uk2.virtual",
+      "beamconnect": "connect.uk2.broker.example"
+    },
+    {
+      "id":"RadUk12",
+      "name":"RadiologyAtUk12",
+      "virtualhost": "node23.uk12.network",
+      "beamconnect": "connect.uk12.broker.example"
+    }
+  ]
+}

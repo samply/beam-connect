@@ -89,6 +89,7 @@ provided for routing the messages. This is done, first, with the central service
 discovery, that maps the HTTP authority part (`uk23.virtual` in the example) to
 the intended Beam.AppId. On the receiving side, the same authority is
 subsequently replaced by an internal host name provided in the local targets file.
+Examples for the expected mappings are in the `examples/` folder.
 
 A mishap in communication will be returned as appropriate HTTP replies.
 
