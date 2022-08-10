@@ -4,8 +4,6 @@ use hyper::{StatusCode, header::ToStrError, http::uri::Authority};
 use log::error;
 use shared::errors::SamplyBeamError;
 
-pub type InternalHost = Authority;
-
 #[derive(Debug)]
 pub(crate) struct MyStatusCode {
     pub(crate) code: StatusCode

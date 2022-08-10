@@ -26,6 +26,8 @@ pub(crate) enum BeamConnectError {
     ResponseNotValidUtf8String(#[from] FromUtf8Error),
     #[error("Reply invalid: {0}")]
     ReplyInvalid(String),
+    #[error("Configuration error: {0}")]
+    ConfigurationError(String)
     // #[error("Unable to build reply: {0}")]
     // BuildReplyFailed(hyper::http::Error)
 }

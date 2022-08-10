@@ -1,11 +1,13 @@
 use std::{sync::Arc, collections::HashMap, str::FromStr};
 
 use hyper::{Request, Body, Client, client::HttpConnector, Response, header, StatusCode, body, Uri};
+use hyper_proxy::ProxyConnector;
+use hyper_tls::HttpsConnector;
 use log::{info, debug, warn, error};
 use serde_json::Value;
 use shared::{beam_id::AppId, MsgTaskResult, MsgTaskRequest};
 
-use crate::{config::Config, structs::{InternalHost, MyStatusCode}, msg::{HttpRequest, HttpResponse}, errors::BeamConnectError};
+use crate::{config::Config, structs::{MyStatusCode}, msg::{HttpRequest, HttpResponse}, errors::BeamConnectError};
 
 /// GET   http://some.internal.system?a=b&c=d
 /// Host: <identical>
@@ -13,9 +15,9 @@ use crate::{config::Config, structs::{InternalHost, MyStatusCode}, msg::{HttpReq
 pub(crate) async fn handler_http(
     mut req: Request<Body>,
     config: Arc<Config>,
-    client: Client<HttpConnector>,
-    targets: Arc<HashMap<InternalHost, AppId>>
+    client: Client<ProxyConnector<HttpsConnector<HttpConnector>>>
 ) -> Result<Response<Body>,MyStatusCode> {
+    let targets = &config.targets_public;
     let method = req.method().to_owned();
     let uri = req.uri().to_owned();
     let headers = req.headers_mut();
@@ -32,7 +34,8 @@ pub(crate) async fn handler_http(
     // }
 
     let target = targets.get(uri.authority().unwrap()) //TODO unwrap
-        .ok_or(StatusCode::UNAUTHORIZED)?;
+        .ok_or(StatusCode::UNAUTHORIZED)?
+        .beamconnect;
 
     info!("{method} {uri} via {target}");
 
