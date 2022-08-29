@@ -1,5 +1,5 @@
-use std::{sync::Arc, collections::HashMap, str::FromStr};
-
+use std::{sync::Arc, str::FromStr};
+use std::time::{Duration, SystemTime};
 use hyper::{Request, Body, Client, client::HttpConnector, Response, header, StatusCode, body, Uri};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
@@ -7,7 +7,7 @@ use log::{info, debug, warn, error};
 use serde_json::Value;
 use shared::{beam_id::AppId, MsgTaskResult, MsgTaskRequest};
 
-use crate::{config::Config, structs::{MyStatusCode}, msg::{HttpRequest, HttpResponse}, errors::BeamConnectError};
+use crate::{config::Config, structs::MyStatusCode, msg::{HttpRequest, HttpResponse}, errors::BeamConnectError};
 
 /// GET   http://some.internal.system?a=b&c=d
 /// Host: <identical>
@@ -39,7 +39,7 @@ pub(crate) async fn handler_http(
 
     info!("{method} {uri} via {target}");
 
-    let msg = http_req_to_struct(req, &config.my_app_id, &target).await?;
+    let msg = http_req_to_struct(req, &config.my_app_id, &target, &config.expire).await?;
 
     // Send to Proxy
     let req_to_proxy = Request::builder()
@@ -138,7 +138,7 @@ pub(crate) async fn handler_http(
     Ok(resp)
 }
 
-async fn http_req_to_struct(req: Request<Body>, my_id: &AppId, target_id: &AppId) -> Result<MsgTaskRequest,MyStatusCode> {
+async fn http_req_to_struct(req: Request<Body>, my_id: &AppId, target_id: &AppId, expire: &u64) -> Result<MsgTaskRequest,MyStatusCode> {
     let method = req.method().clone();
     let url = req.uri().clone();
     let headers = req.headers().clone();
@@ -155,12 +155,15 @@ async fn http_req_to_struct(req: Request<Body>, my_id: &AppId, target_id: &AppId
         headers,
         body,
     };
-    
-    Ok(MsgTaskRequest::new(
+    let mut msg = MsgTaskRequest::new(
         my_id.into(),
         vec![target_id.into()],
         serde_json::to_string(&http_req)?,
         shared::FailureStrategy::Discard,
         Value::Null
-    ))
+    );
+
+    msg.expire = SystemTime::now() + Duration::from_secs(*expire);
+    
+    Ok(msg)
 }
