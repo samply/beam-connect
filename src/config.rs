@@ -39,6 +39,10 @@ struct CliArgs {
     /// Outgoing HTTP proxy: Directory with CA certificates to trust for TLS connections (e.g. /etc/samply/cacerts/)
     #[clap(long, env, value_parser)]
     tls_ca_certificates_dir: Option<PathBuf>,
+
+    /// Expiry time of the request in seconds
+    #[clap(long, env, value_parser, default_value = "3600")]
+    expire: u64,
 }
 
 #[derive(Deserialize,Clone,Debug)]
@@ -123,6 +127,7 @@ pub(crate) struct Config {
     pub(crate) bind_addr: String,
     pub(crate) targets_local: LocalMapping,
     pub(crate) targets_public: CentralMapping,
+    pub(crate) expire: u64,
     pub(crate) client: Client<ProxyConnector<HttpsConnector<HttpConnector>>>
 }
 
@@ -152,8 +157,10 @@ impl Config {
         let my_app_id = AppId::new(&args.app_id)?;
         let broker_id = BrokerId::new(&broker_id)?;
 
+        let expire = args.expire;
+
         let tls_ca_certificates = shared::crypto::load_certificates_from_dir(args.tls_ca_certificates_dir)?;
-        let client = build_hyper_client(tls_ca_certificates)?;
+        let client = build_hyper_client(&tls_ca_certificates)?;
 
         let targets_public = load_public_targets(&client, &args.discovery_url).await?;
         let targets_local = load_local_targets(&broker_id, &args.local_targets_file)?;
@@ -165,6 +172,7 @@ impl Config {
             bind_addr: args.bind_addr,
             targets_local,
             targets_public,
+            expire,
             client
         })
     }
