@@ -38,6 +38,6 @@ serde = "*"
 serde_json = "*"
 hyper_serde = "0.13"
 
-clap = {version = "3", features = ["derive"]}
+clap = {version = "4", features = ["derive"]}
 
 thiserror = "*"
