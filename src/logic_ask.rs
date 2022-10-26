@@ -33,6 +33,21 @@ pub(crate) async fn handler_http(
     //     return Err(StatusCode::CONFLICT.into());
     // }
 
+    // If the autority is empty (e.g. if localhost is used) or the authoroty is not in the routing
+    // table AND the path is /sites, return global routing table
+    if let Some(path) = uri.path_and_query() { 
+        if (uri.authority().is_none() || targets.get(uri.authority().unwrap()).is_none()) && path == "/sites" {
+            debug!("Central Site Discovery requested");
+            let body = body::Body::from(serde_json::to_string(targets)?);
+            let response = Response::builder()
+                .status(200)
+                .body(body)
+                .unwrap();
+            return Ok(response);
+
+        }
+    }
+
     let target = targets.get(uri.authority().unwrap()) //TODO unwrap
         .ok_or(StatusCode::UNAUTHORIZED)?
         .beamconnect;

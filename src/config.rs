@@ -4,7 +4,7 @@ use clap::Parser;
 use hyper::{Uri, http::uri::Authority, client::HttpConnector, Client};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
-use serde::{Deserialize, Deserializer, de::Visitor};
+use serde::{Serialize, Deserialize, Deserializer, de::Visitor};
 use shared::{beam_id::{AppId, BeamId, app_to_broker_id, BrokerId}, http_proxy::build_hyper_client};
 
 use crate::{example_targets, errors::BeamConnectError};
@@ -45,7 +45,7 @@ struct CliArgs {
     expire: u64,
 }
 
-#[derive(Deserialize,Clone,Debug)]
+#[derive(Serialize, Deserialize,Clone,Debug)]
 pub(crate) struct CentralMapping {
     pub(crate) sites: Vec<Site>
 }
@@ -61,38 +61,14 @@ impl CentralMapping {
     }
 }
 
-#[derive(Deserialize,Clone,Debug)]
+#[derive(Serialize, Deserialize,Clone,Debug)]
 pub(crate) struct Site {
     pub(crate) id: String,
     pub(crate) name: String,
-    #[serde(deserialize_with = "deserialize_authority")]
+    #[serde(with = "http_serde::authority")]
     pub(crate) virtualhost: Authority,
     pub(crate) beamconnect: AppId,
 }
-
-fn deserialize_authority<'de, D>(deserializer: D) -> Result<Authority, D::Error> 
-where D: Deserializer<'de> {
-    deserializer.deserialize_str(AuthorityVisitor {})
-}
-
-struct AuthorityVisitor { }
-
-impl<'de> Visitor<'de> for AuthorityVisitor {
-    type Value = Authority;
-
-    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(formatter, "Authority part of a URL")
-    }
-
-    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-        where
-            E: serde::de::Error, {
-        let auth = Authority::from_str(v)
-            .map_err(|e| serde::de::Error::invalid_value(serde::de::Unexpected::Str(v), &self))?;
-        Ok(auth)
-    }
-}
-
 
 #[derive(Clone,Deserialize,Debug)]
 pub(crate) struct LocalMapping {
@@ -111,9 +87,9 @@ impl LocalMapping {
 
 #[derive(Clone,Deserialize,Debug)]
 pub(crate) struct LocalMappingEntry {
-    #[serde(deserialize_with = "deserialize_authority", rename="external")]
+    #[serde(with = "http_serde::authority", rename="external")]
     pub(crate) needle: Authority, // Host part of URL
-    #[serde(deserialize_with = "deserialize_authority", rename="internal")]
+    #[serde(with = "http_serde::authority", rename="internal")]
     pub(crate) replace: Authority,
     pub(crate) allowed: Vec<AppId>
 }
