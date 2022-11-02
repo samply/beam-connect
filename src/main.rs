@@ -13,19 +13,22 @@ mod errors;
 mod structs;
 mod logic_ask;
 mod logic_reply;
+mod banner;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>>{
     pretty_env_logger::init();
-
+    banner::print_banner();
     let config = Config::load().await?;
     let config2 = config.clone();
     let listen = SocketAddr::from_str(&config2.bind_addr).unwrap();
     let client = config.client.clone();
     let client2 = client.clone();
+    banner::print_startup_app_config(&config);
 
     info!("Global site discovery: {:?}", config.targets_public);
     info!("Local site Access: {:?}", config.targets_local);
+
 
     let http_executor = tokio::task::spawn(async move {
         loop {
