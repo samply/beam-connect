@@ -47,8 +47,11 @@ pub(crate) async fn handler_http(
     //let auth = 
         //headers.remove(header::PROXY_AUTHORIZATION)
             //.ok_or(StatusCode::PROXY_AUTHENTICATION_REQUIRED)?;
+    if uri.authority().is_none() {
+        return Err(StatusCode::BAD_REQUEST.into());
+    }
 
-    let target = targets.get(uri.authority().unwrap()) //TODO unwrap
+    let target = targets.get(uri.authority().unwrap()) // Option is checked above
         .ok_or(StatusCode::UNAUTHORIZED)?
         .beamconnect;
 
