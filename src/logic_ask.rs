@@ -44,9 +44,9 @@ pub(crate) async fn handler_http(
         }
     }
 
-    let auth = 
-        headers.remove(header::PROXY_AUTHORIZATION)
-            .ok_or(StatusCode::PROXY_AUTHENTICATION_REQUIRED)?;
+    //let auth = 
+        //headers.remove(header::PROXY_AUTHORIZATION)
+            //.ok_or(StatusCode::PROXY_AUTHENTICATION_REQUIRED)?;
 
     let target = targets.get(uri.authority().unwrap()) //TODO unwrap
         .ok_or(StatusCode::UNAUTHORIZED)?
@@ -60,7 +60,7 @@ pub(crate) async fn handler_http(
     let req_to_proxy = Request::builder()
         .method("POST")
         .uri(format!("{}v1/tasks", config.proxy_url))
-        .header(header::AUTHORIZATION, auth.clone())
+        .header(header::AUTHORIZATION, config.proxy_auth.clone())
         .body(body::Body::from(serde_json::to_vec(&msg)?))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     debug!("SENDING request to Proxy: {:?}, {:?}", msg, req_to_proxy);
@@ -84,7 +84,7 @@ pub(crate) async fn handler_http(
         .build().unwrap(); // TODO
     debug!("Fetching reply from Proxy: {results_uri}");
     let req = Request::builder()
-        .header(header::AUTHORIZATION, auth)
+        .header(header::AUTHORIZATION, config.proxy_auth.clone())
         .uri(results_uri)
         .body(body::Body::empty()).unwrap();
     let mut resp = client.request(req).await
