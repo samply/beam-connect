@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use hyper::{Client, client::HttpConnector, Request, header, StatusCode, body, Response, Body, Uri};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
@@ -6,6 +8,7 @@ use serde_json::Value;
 use shared::{MsgTaskRequest, MsgTaskResult, MsgId,beam_id::{BeamId,AppId}};
 
 use crate::{config::Config, errors::BeamConnectError, msg::{IsValidHttpTask, HttpResponse}};
+use http::uri::Authority;
 
 pub(crate) async fn process_requests(config: Config, client: Client<ProxyConnector<HttpsConnector<HttpConnector>>>) -> Result<(), BeamConnectError> {
     // Fetch tasks from Proxy
@@ -54,7 +57,19 @@ async fn send_reply(task: &MsgTaskRequest, config: &Config, client: &Client<Prox
 async fn execute_http_task(task: &MsgTaskRequest, config: &Config, client: &Client<ProxyConnector<HttpsConnector<HttpConnector>>>) -> Result<Response<Body>, BeamConnectError> {
     let task_req = task.http_request()?;
     info!("{} | {} {}", task.from, task_req.method, task_req.url);
-    let target = config.targets_local.get(task_req.url.authority().unwrap()) //TODO unwrap
+    let target_auth = match task_req.url.authority() {
+        Some(auth) => auth.clone(),
+        None => {
+            let Some(host) = task_req.headers.get("Host") else {
+                return Err(BeamConnectError::CommunicationWithTargetFailed("Invalid Host header field in request".into()));
+            };
+            let Ok(auth) = Authority::from_str(host.to_str().unwrap()) else {
+                return Err(BeamConnectError::CommunicationWithTargetFailed("Invalid authority requested".into()));
+            };
+            auth
+        }
+    };
+    let target = config.targets_local.get(&target_auth)
         .ok_or(BeamConnectError::CommunicationWithTargetFailed(String::from("Target not defined")))?;
     if !target.allowed.contains(&AppId::try_from(&task.from).or(Err(BeamConnectError::IdNotAuthorizedToAccessUrl(task.from.clone(), task_req.url.clone())))?) {
         return Err(BeamConnectError::IdNotAuthorizedToAccessUrl(task.from.clone(), task_req.url.clone()));
