@@ -50,29 +50,39 @@ pub(crate) async fn handler_http(
         //headers.remove(header::PROXY_AUTHORIZATION)
             //.ok_or(StatusCode::PROXY_AUTHENTICATION_REQUIRED)?;
     let target_auth = match uri.authority() {
-        Some(auth) => auth.to_owned(),
+        Some(auth) => Ok(auth.to_owned()),
         None => {
             if uri.path_and_query().is_some() {
                 match headers.get("Host").is_some() {
                     true => {
                         debug!("No Authority found, subsituting by \"Host\" Header: {:?} ", headers.get("Host").unwrap());
-                        Authority::from_str(headers.get("Host").unwrap().to_str().unwrap()).unwrap_or(Authority::from_str("").unwrap())
+                        let authority_string = headers.get("Host").unwrap().to_str().unwrap();
+                        let new_authority = Authority::from_str(authority_string).unwrap();
+                        debug!("New authority: {:?}", new_authority);
+                        //Authority::from_str(headers.get("Host").unwrap().to_str().unwrap())
+                        Ok(new_authority)
                     },
-                    false => Authority::from_str("").unwrap()
+                    false => Err(())
                 }
             } else {
-                Authority::from_str("").unwrap()
+                Err(())
             }
         }
     };
-    let target = targets.get(&target_auth);
+    if target_auth.is_err() {
+        debug!("There was an error in the authority creation: {:?}", target_auth.as_ref().unwrap_err());
+        Err(StatusCode::BAD_REQUEST)?;
+    }
+    let target = targets.get(&target_auth.unwrap())
+        .ok_or(StatusCode::UNAUTHORIZED)?
+        .beamconnect;
     //if uri.authority().is_none() {
         //return Err(StatusCode::BAD_REQUEST.into());
     //}
 
-    let target = target
-        .ok_or(StatusCode::UNAUTHORIZED)?
-        .beamconnect;
+    //let target = target
+        //.ok_or(StatusCode::UNAUTHORIZED)?
+        //.beamconnect;
 
     info!("{method} {uri} via {target}");
 
