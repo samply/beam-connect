@@ -42,6 +42,7 @@ clap = {version = "4", features = ["derive"]}
 
 thiserror = "*"
 http-serde = "1.1.2"
+http = "0.2.8"
 
 [build-dependencies]
 build-data = "0"

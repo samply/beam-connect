@@ -6,6 +6,7 @@ use hyper_tls::HttpsConnector;
 use log::{info, debug, warn, error};
 use serde_json::Value;
 use shared::{beam_id::AppId, MsgTaskResult, MsgTaskRequest};
+use http::uri::Authority;
 
 use crate::{config::Config, structs::MyStatusCode, msg::{HttpRequest, HttpResponse}, errors::BeamConnectError};
 
@@ -48,11 +49,28 @@ pub(crate) async fn handler_http(
     //let auth = 
         //headers.remove(header::PROXY_AUTHORIZATION)
             //.ok_or(StatusCode::PROXY_AUTHENTICATION_REQUIRED)?;
-    if uri.authority().is_none() {
-        return Err(StatusCode::BAD_REQUEST.into());
-    }
+    let target_auth = match uri.authority() {
+        Some(auth) => auth.to_owned(),
+        None => {
+            if uri.path_and_query().is_some() {
+                match headers.get("Host").is_some() {
+                    true => {
+                        debug!("No Authority found, subsituting by \"Host\" Header: {:?} ", headers.get("Host").unwrap());
+                        Authority::from_str(headers.get("Host").unwrap().to_str().unwrap()).unwrap_or(Authority::from_str("").unwrap())
+                    },
+                    false => Authority::from_str("").unwrap()
+                }
+            } else {
+                Authority::from_str("").unwrap()
+            }
+        }
+    };
+    let target = targets.get(&target_auth);
+    //if uri.authority().is_none() {
+        //return Err(StatusCode::BAD_REQUEST.into());
+    //}
 
-    let target = targets.get(uri.authority().unwrap()) // Option is checked above
+    let target = target
         .ok_or(StatusCode::UNAUTHORIZED)?
         .beamconnect;
 
