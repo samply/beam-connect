@@ -8,7 +8,7 @@ use serde_json::Value;
 use shared::{MsgTaskRequest, MsgTaskResult, MsgId,beam_id::{BeamId,AppId}};
 
 use crate::{config::Config, errors::BeamConnectError, msg::{IsValidHttpTask, HttpResponse}};
-use http::uri::Authority;
+use http::uri::{Authority, Scheme};
 
 pub(crate) async fn process_requests(config: Config, client: Client<ProxyConnector<HttpsConnector<HttpConnector>>>) -> Result<(), BeamConnectError> {
     // Fetch tasks from Proxy
@@ -63,7 +63,7 @@ async fn execute_http_task(task: &MsgTaskRequest, config: &Config, client: &Clie
             let Some(host) = task_req.headers.get("Host") else {
                 return Err(BeamConnectError::CommunicationWithTargetFailed("Invalid Host header field in request".into()));
             };
-            let Ok(auth) = Authority::from_str(host.to_str().unwrap()) else {
+            let Ok(auth) = Authority::from_str(host.to_str().unwrap_or("")) else {
                 return Err(BeamConnectError::CommunicationWithTargetFailed("Invalid authority requested".into()));
             };
             auth
@@ -75,7 +75,7 @@ async fn execute_http_task(task: &MsgTaskRequest, config: &Config, client: &Clie
         return Err(BeamConnectError::IdNotAuthorizedToAccessUrl(task.from.clone(), task_req.url.clone()));
     }
     let uri = Uri::builder()
-        .scheme(task_req.url.scheme().unwrap().as_str())
+        .scheme(task_req.url.scheme().unwrap_or(&Scheme::HTTP).as_str())
         .authority(target.replace.to_owned())
         .path_and_query(task_req.url.path())
         .build().unwrap(); // TODO
