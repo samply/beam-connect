@@ -6,7 +6,7 @@ use hyper_tls::HttpsConnector;
 use log::{info, debug, warn, error};
 use serde_json::Value;
 use shared::{beam_id::AppId, MsgTaskResult, MsgTaskRequest};
-use http::uri::Authority;
+use http::uri::{Authority, Scheme, PathAndQuery, InvalidUriParts};
 
 use crate::{config::Config, structs::MyStatusCode, msg::{HttpRequest, HttpResponse}, errors::BeamConnectError};
 
@@ -73,7 +73,9 @@ pub(crate) async fn handler_http(
         debug!("There was an error in the authority creation: {:?}", target_auth.as_ref().unwrap_err());
         Err(StatusCode::BAD_REQUEST)?;
     }
-    let target = targets.get(&target_auth.unwrap())
+
+
+    let target = targets.get(target_auth.as_ref().unwrap())
         .ok_or(StatusCode::UNAUTHORIZED)?
         .beamconnect;
     //if uri.authority().is_none() {
@@ -84,9 +86,10 @@ pub(crate) async fn handler_http(
         //.ok_or(StatusCode::UNAUTHORIZED)?
         //.beamconnect;
 
+    let new_uri = copy_and_mod_uri(uri.clone(), None, Some(target_auth.unwrap()), None).or(Err(StatusCode::BAD_REQUEST))?;
     info!("{method} {uri} via {target}");
 
-    let msg = http_req_to_struct(req, &config.my_app_id, &target, &config.expire).await?;
+    let msg = http_req_to_struct(req, &config.my_app_id, &target, &config.expire, new_uri).await?;
 
     // Send to Proxy
     let req_to_proxy = Request::builder()
@@ -185,9 +188,9 @@ pub(crate) async fn handler_http(
     Ok(resp)
 }
 
-async fn http_req_to_struct(req: Request<Body>, my_id: &AppId, target_id: &AppId, expire: &u64) -> Result<MsgTaskRequest,MyStatusCode> {
+async fn http_req_to_struct(req: Request<Body>, my_id: &AppId, target_id: &AppId, expire: &u64, new_uri: Uri) -> Result<MsgTaskRequest,MyStatusCode> {
     let method = req.method().clone();
-    let url = req.uri().clone();
+    let url = new_uri;
     let headers = req.headers().clone();
     let body = body::to_bytes(req).await
         .map_err(|e| {
@@ -213,4 +216,18 @@ async fn http_req_to_struct(req: Request<Body>, my_id: &AppId, target_id: &AppId
     msg.expire = SystemTime::now() + Duration::from_secs(*expire);
     
     Ok(msg)
+}
+
+fn copy_and_mod_uri(uri: Uri, scheme: Option<Scheme>, authority: Option<Authority>, path_and_query: Option<PathAndQuery>) -> Result<Uri, InvalidUriParts> {
+    let mut parts = uri.into_parts();
+    if scheme.is_some() {
+        parts.scheme = Some(scheme.unwrap());
+    }
+    if authority.is_some() {
+        parts.authority = Some(authority.unwrap());
+    }
+    if path_and_query.is_some() {
+        parts.path_and_query = Some(path_and_query.unwrap());
+    }
+    Uri::from_parts(parts)
 }
