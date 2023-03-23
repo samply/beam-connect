@@ -122,7 +122,7 @@ pub(crate) async fn handler_http(
     }
     let result = body.drain(0..1).next().unwrap().status;
     let response_inner = match result {
-        shared::WorkStatus::Succeeded(b) => {
+        shared::WorkStatus::Succeeded => {
             serde_json::from_str::<HttpResponse>(&b)?
         },
         e => {

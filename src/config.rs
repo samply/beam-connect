@@ -5,7 +5,7 @@ use hyper::{Uri, http::uri::Authority, client::HttpConnector, Client};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
 use serde::{Serialize, Deserialize, Deserializer, de::Visitor};
-use shared::{beam_id::{AppId, BeamId, app_to_broker_id, BrokerId}, http_proxy::build_hyper_client};
+use shared::{beam_id::{AppId, BeamId, app_to_broker_id, BrokerId}, http_client::{SamplyHttpClient, self}};
 
 use crate::{example_targets, errors::BeamConnectError};
 
@@ -104,7 +104,7 @@ pub(crate) struct Config {
     pub(crate) targets_local: LocalMapping,
     pub(crate) targets_public: CentralMapping,
     pub(crate) expire: u64,
-    pub(crate) client: Client<ProxyConnector<HttpsConnector<HttpConnector>>>
+    pub(crate) client: SamplyHttpClient
 }
 
 fn load_local_targets(broker_id: &BrokerId, local_target_path: &Option<PathBuf>) -> Result<LocalMapping,Box<dyn Error>> {
@@ -117,7 +117,7 @@ fn load_local_targets(broker_id: &BrokerId, local_target_path: &Option<PathBuf>)
     Ok(example_targets::example_local(broker_id))
 }
 
-async fn load_public_targets(client: &Client<ProxyConnector<HttpsConnector<HttpConnector>>>, url: &Uri) -> Result<CentralMapping,BeamConnectError> {
+async fn load_public_targets(client: &SamplyHttpClient, url: &Uri) -> Result<CentralMapping,BeamConnectError> {
     let mut response = client.get(url.clone()).await.map_err(|e| BeamConnectError::ConfigurationError(format!("Cannot retreive central service discovery configuration: {}",e)))?;
     let body = response.body_mut();
     let bytes = hyper::body::to_bytes(body).await.map_err(|e|BeamConnectError::ConfigurationError(format!("Invalid central site discovery response: {}",e)))?;
@@ -129,14 +129,14 @@ impl Config {
     pub(crate) async fn load() -> Result<Self,Box<dyn Error>> {
         let args = CliArgs::parse();
         let broker_id = app_to_broker_id(&args.app_id)?;
-        AppId::set_broker_id(&broker_id);
+        AppId::set_broker_id(broker_id.clone());
         let my_app_id = AppId::new(&args.app_id)?;
         let broker_id = BrokerId::new(&broker_id)?;
 
         let expire = args.expire;
 
         let tls_ca_certificates = shared::crypto::load_certificates_from_dir(args.tls_ca_certificates_dir)?;
-        let client = build_hyper_client(&tls_ca_certificates)?;
+        let client = http_client::build(&tls_ca_certificates, None, None)?;
 
         let targets_public = load_public_targets(&client, &args.discovery_url).await?;
         let targets_local = load_local_targets(&broker_id, &args.local_targets_file)?;
@@ -207,7 +207,7 @@ mod tests {
     #[test]
     fn local_target_configuration() {
         let broker_id = app_to_broker_id("foo.bar.broker.example").unwrap();
-        BrokerId::set_broker_id(&broker_id);
+        BrokerId::set_broker_id(broker_id.clone());
         let broker_id = BrokerId::new(&broker_id).unwrap();
         let serialized = r#"[
             {"external": "ifconfig.me","internal":"ifconfig.me","allowed":["connect1.proxy23.broker.example","connect2.proxy23.broker.example"]},

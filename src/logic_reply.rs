@@ -3,7 +3,7 @@ use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
 use log::{info, warn, debug};
 use serde_json::Value;
-use shared::{MsgTaskRequest, MsgTaskResult, MsgId,beam_id::{BeamId,AppId}};
+use shared::{MsgTaskRequest, MsgTaskResult, MsgId,beam_id::{BeamId,AppId}, WorkStatus, Plain};
 
 use crate::{config::Config, errors::BeamConnectError, msg::{IsValidHttpTask, HttpResponse}};
 
@@ -33,8 +33,9 @@ async fn send_reply(task: &MsgTaskRequest, config: &Config, client: &Client<Prox
         from: config.my_app_id.clone().into(),
         to: vec![task.from.clone()],
         task: task.id,
-        status: shared::WorkStatus::Succeeded(http_reply),
-        metadata: Value::Null
+        status: WorkStatus::Succeeded,
+        metadata: Value::Null,
+        body: Plain::from(http_reply),
     };
     let req_to_proxy = Request::builder()
         .method("PUT")
