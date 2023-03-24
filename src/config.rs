@@ -1,10 +1,8 @@
-use std::{error::Error, str::FromStr, path::PathBuf};
+use std::{error::Error, path::PathBuf};
 
 use clap::Parser;
-use hyper::{Uri, http::uri::Authority, client::HttpConnector, Client};
-use hyper_proxy::ProxyConnector;
-use hyper_tls::HttpsConnector;
-use serde::{Serialize, Deserialize, Deserializer, de::Visitor};
+use hyper::{Uri, http::uri::Authority};
+use serde::{Serialize, Deserialize};
 use shared::{beam_id::{AppId, BeamId, app_to_broker_id, BrokerId}, http_client::{SamplyHttpClient, self}};
 
 use crate::{example_targets, errors::BeamConnectError};
@@ -51,17 +49,17 @@ pub(crate) struct CentralMapping {
 }
 
 impl CentralMapping {
-    pub(crate) fn get(&self, auth: &Authority) -> Option<Site> {
+    pub(crate) fn get(&self, auth: &Authority) -> Option<&Site> {
         for site in &self.sites {
             if site.virtualhost == *auth {
-                return Some(site.clone())
+                return Some(site)
             }
         }
         return None
     }
 }
 
-#[derive(Serialize, Deserialize,Clone,Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub(crate) struct Site {
     pub(crate) id: String,
     pub(crate) name: String,

@@ -5,6 +5,7 @@ use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
 use log::{info, debug, warn, error};
 use serde_json::Value;
+use shared::http_client::SamplyHttpClient;
 use shared::{beam_id::AppId, MsgTaskResult, MsgTaskRequest};
 
 use crate::{config::Config, structs::MyStatusCode, msg::{HttpRequest, HttpResponse}, errors::BeamConnectError};
@@ -15,8 +16,8 @@ use crate::{config::Config, structs::MyStatusCode, msg::{HttpRequest, HttpRespon
 pub(crate) async fn handler_http(
     mut req: Request<Body>,
     config: Arc<Config>,
-    client: Client<ProxyConnector<HttpsConnector<HttpConnector>>>
-) -> Result<Response<Body>,MyStatusCode> {
+    client: SamplyHttpClient
+) -> Result<Response<Body>, MyStatusCode> {
     let targets = &config.targets_public;
     let method = req.method().to_owned();
     let uri = req.uri().to_owned();
@@ -48,7 +49,7 @@ pub(crate) async fn handler_http(
         }
     }
 
-    let target = targets.get(uri.authority().unwrap()) //TODO unwrap
+    let target = &targets.get(uri.authority().unwrap()) //TODO unwrap
         .ok_or(StatusCode::UNAUTHORIZED)?
         .beamconnect;
 
@@ -110,20 +111,24 @@ pub(crate) async fn handler_http(
 
     let bytes = body::to_bytes(resp.body_mut()).await
         .map_err(|_| StatusCode::BAD_GATEWAY)?;
-    let mut body = serde_json::from_slice::<Vec<MsgTaskResult>>(&bytes)
+    let mut task_results = serde_json::from_slice::<Vec<MsgTaskResult>>(&bytes)
         .map_err(|e| {
             warn!("Unable to parse HTTP result: {}", e);
             StatusCode::BAD_GATEWAY
         })?;
-    debug!("Got reply: {:?}", body);
-    if body.len() != 1 {
-        error!("Reply had more than one answer (namely: {}). This should not happen; discarding request.", body.len());
+    debug!("Got reply: {:?}", task_results);
+
+    if task_results.len() != 1 {
+        error!("Reply had more than one answer (namely: {}). This should not happen; discarding request.", task_results.len());
         return Err(StatusCode::BAD_GATEWAY)?;
     }
-    let result = body.drain(0..1).next().unwrap().status;
-    let response_inner = match result {
+    let result = task_results.pop().unwrap();
+    let response_inner = match result.status {
         shared::WorkStatus::Succeeded => {
-            serde_json::from_str::<HttpResponse>(&b)?
+            serde_json::from_str::<HttpResponse>(&result.body.body.ok_or({
+                warn!("Recieved one sucessfull result but it has no body");
+                StatusCode::BAD_GATEWAY
+            })?)?
         },
         e => {
             warn!("Reply had unexpected workresult code: {}", e);
@@ -153,14 +158,14 @@ pub(crate) async fn handler_http(
     Ok(resp)
 }
 
-async fn http_req_to_struct(req: Request<Body>, my_id: &AppId, target_id: &AppId, expire: &u64) -> Result<MsgTaskRequest,MyStatusCode> {
+async fn http_req_to_struct(req: Request<Body>, my_id: &AppId, target_id: &AppId, expire: &u64) -> Result<MsgTaskRequest, MyStatusCode> {
     let method = req.method().clone();
     let url = req.uri().clone();
     let headers = req.headers().clone();
     let body = body::to_bytes(req).await
         .map_err(|e| {
             println!("{e}");
-            MyStatusCode { code: StatusCode::BAD_REQUEST }
+            StatusCode::BAD_REQUEST
     })?;
     let body = String::from_utf8(body.to_vec())?;
 

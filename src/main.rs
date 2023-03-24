@@ -5,6 +5,7 @@ use hyper::{body, Body, service::{service_fn, make_service_fn}, Request, Respons
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
 use log::{info, error, debug, warn};
+use shared::http_client::SamplyHttpClient;
 
 mod msg;
 mod example_targets;
@@ -69,7 +70,7 @@ async fn main() -> Result<(), Box<dyn Error>>{
 async fn handler_http_wrapper(
     req: Request<Body>,
     config: Arc<Config>,
-    client: Client<ProxyConnector<HttpsConnector<HttpConnector>>>
+    client: SamplyHttpClient
 ) -> Result<Response<Body>, Infallible> {
     match logic_ask::handler_http(req, config, client).await {
         Ok(e) => Ok(e),
