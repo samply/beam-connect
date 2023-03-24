@@ -73,9 +73,7 @@ async fn execute_http_task(task: &MsgTaskRequest, config: &Config, client: &Samp
         .uri(uri);
     *req.headers_mut().unwrap() = task_req.headers;
     let body = body::Body::from(task_req.body);
-    let req = 
-        req.body(body)
-        .map_err(BeamConnectError::HyperBuildError)?;
+    let req = req.body(body)?;
     debug!("Issuing request: {:?}", req);
     let resp = client.request(req).await
         .map_err(|e| BeamConnectError::CommunicationWithTargetFailed(e.to_string()))?;
@@ -86,8 +84,9 @@ async fn fetch_requests(config: &Config, client: &SamplyHttpClient) -> Result<Ve
     let req_to_proxy = Request::builder()
         .uri(format!("{}v1/tasks?to={}&wait_count=1&filter=todo", config.proxy_url, config.my_app_id))
         .header(header::AUTHORIZATION, config.proxy_auth.clone())
-        .body(body::Body::empty())
-        .map_err(BeamConnectError::HyperBuildError)?;
+        .header(header::ACCEPT, "application/json")
+        .body(body::Body::empty())?;
+    info!("Requesting {req_to_proxy:?}");
     let mut resp = client.request(req_to_proxy).await
         .map_err(BeamConnectError::ProxyHyperError)?;
     match resp.status() {

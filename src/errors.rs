@@ -13,7 +13,7 @@ pub(crate) enum BeamConnectError {
     #[error("Unable to communicate with Proxy: {0}")]
     ProxyOtherError(String),
     #[error("Constructing HTTP request failed: {0}")]
-    HyperBuildError(hyper::http::Error),
+    HyperBuildError(#[from] hyper::http::Error),
     #[error("Error in (de-)serialization from/to JSON: {0}")]
     SerdeError(#[from] serde_json::Error),
     #[error("AppId {0} is not authorized to access URL {1}")]

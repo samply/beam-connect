@@ -1,11 +1,36 @@
-use std::{error::Error, path::PathBuf};
+use std::{error::Error, path::PathBuf, fs::File, str::FromStr};
 
 use clap::Parser;
-use hyper::{Uri, http::uri::Authority};
+use hyper::{Uri, http::uri::{Authority, Scheme}};
+use log::info;
 use serde::{Serialize, Deserialize};
 use shared::{beam_id::{AppId, BeamId, app_to_broker_id, BrokerId}, http_client::{SamplyHttpClient, self}};
 
 use crate::{example_targets, errors::BeamConnectError};
+
+#[derive(Debug, Clone)]
+enum PathOrUri {
+    Path(PathBuf),
+    Uri(Uri),
+}
+
+impl FromStr for PathOrUri {
+    type Err = BeamConnectError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match Uri::try_from(s) {
+            Ok(uri) => Ok(Self::Uri(uri)),
+            Err(e_uri) => {
+                let p = PathBuf::from(s);
+                if p.is_file() {
+                    Ok(Self::Path(p))
+                } else {
+                    Err(BeamConnectError::ConfigurationError(format!("Failed to convert {s} to Filepath or Uri")))
+                }
+            }
+        }
+    }
+}
 
 /// Settings for Samply.Beam (Shared)
 #[derive(Parser,Debug)]
@@ -28,7 +53,7 @@ struct CliArgs {
 
     /// URL to Service Discovery JSON
     #[clap(long, env, value_parser)]
-    discovery_url: Uri,
+    discovery_url: PathOrUri,
 
     /// Path of the local target configuration.
     #[clap(long, env, value_parser)]
@@ -115,11 +140,28 @@ fn load_local_targets(broker_id: &BrokerId, local_target_path: &Option<PathBuf>)
     Ok(example_targets::example_local(broker_id))
 }
 
-async fn load_public_targets(client: &SamplyHttpClient, url: &Uri) -> Result<CentralMapping,BeamConnectError> {
-    let mut response = client.get(url.clone()).await.map_err(|e| BeamConnectError::ConfigurationError(format!("Cannot retreive central service discovery configuration: {}",e)))?;
-    let body = response.body_mut();
-    let bytes = hyper::body::to_bytes(body).await.map_err(|e|BeamConnectError::ConfigurationError(format!("Invalid central site discovery response: {}",e)))?;
-    let deserialized = serde_json::from_slice::<CentralMapping>(&bytes).map_err(|e|BeamConnectError::ConfigurationError(format!("Cannot parse central service discovery configuration: {}", e)))?;
+async fn load_public_targets(client: &SamplyHttpClient, url: &PathOrUri) -> Result<CentralMapping,BeamConnectError> {
+    let bytes = match url {
+        PathOrUri::Path(path) => {
+            std::fs::read_to_string(path).map_err(|e| BeamConnectError::ConfigurationError(format!("Failed to open central config file: {e}")))?.into()
+        },
+        PathOrUri::Uri(url) => {
+            let mut response = client.get(url
+                    .to_string()
+                    .try_into()
+                    .map_err(|e| BeamConnectError::ConfigurationError(format!("Invalid url for public sites: {e}")))?
+                ).await
+                .map_err(|e| BeamConnectError::ConfigurationError(format!("Cannot retreive central service discovery configuration: {e}"))
+            )?;
+
+            let body = response.body_mut();
+            hyper::body::to_bytes(body).await.map_err(|e| BeamConnectError::ConfigurationError(format!("Invalid central site discovery response: {e}")))?
+        },
+    };
+
+    let deserialized = serde_json::from_slice::<CentralMapping>(&bytes)
+        .map_err(|e| BeamConnectError::ConfigurationError(format!("Cannot parse central service discovery configuration: {e}")))?;
+
     Ok(deserialized)
 }
 

@@ -42,21 +42,19 @@ async fn main() -> Result<(), Box<dyn Error>>{
 
     let config = Arc::new(config.clone());
 
-    let make_service = 
-        make_service_fn(|_conn: &AddrStream| {
-            // let remote_addr = conn.remote_addr();
-            let client = client.clone();
-            let config = config.clone();
-            async {
-                Ok::<_, Infallible>(service_fn(move |req|
-                    handler_http_wrapper(req, config.clone(), client.clone())))
-            }
+    let make_service = make_service_fn(|_conn: &AddrStream| {
+        // let remote_addr = conn.remote_addr();
+        let client = client.clone();
+        let config = config.clone();
+        async {
+            Ok::<_, Infallible>(service_fn(move |req|
+                handler_http_wrapper(req, config.clone(), client.clone())))
+        }
     });
 
-    let server =
-        Server::bind(&listen)
+    let server = Server::bind(&listen)
         .serve(make_service)
-        .with_graceful_shutdown(shutdown_signal());
+        .with_graceful_shutdown(shared::graceful_shutdown::wait_for_signal());
 
     if let Err(e) = server.await {
         eprintln!("server error: {}", e);
