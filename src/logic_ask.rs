@@ -86,6 +86,7 @@ pub(crate) async fn handler_http(
     debug!("Fetching reply from Proxy: {results_uri}");
     let req = Request::builder()
         .header(header::AUTHORIZATION, auth)
+        .header(header::ACCEPT, "application/json")
         .uri(results_uri)
         .body(body::Body::empty()).unwrap();
     let mut resp = client.request(req).await

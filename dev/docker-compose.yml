@@ -62,8 +62,27 @@ services:
       PROXY_URL: "http://proxy1:8081"
       APP_ID: ${APP1_P1}
       PROXY_APIKEY: ${APP_KEY}
-      DISCOVERY_URL: "./map/example_central_mapping.json"
+      DISCOVERY_URL: "./map/example_central_test.json"
       RUST_LOG: ${RUST_LOG}
+  connect2:
+   depends_on:
+     - proxy2
+   build:
+     context: ../
+     dockerfile: Dockerfile.ci
+   image: samply/beam-connect:${TAG}
+   ports:
+     - 8063:8063
+   volumes:
+     - ../examples/:/map
+   environment:
+     PROXY_URL: "http://proxy2:8082"
+     BIND_ADDR: 0.0.0.0:8063
+     APP_ID: ${APP2_P2}
+     PROXY_APIKEY: ${APP_KEY}
+     DISCOVERY_URL: "./map/example_central_test.json"
+     LOCAL_TARGETS_FILE: "./map/example_local_test.json"
+     RUST_LOG: ${RUST_LOG}
   proxy2:
     depends_on: [broker]
     image: samply/beam-proxy:${TAG}
