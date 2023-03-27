@@ -22,7 +22,7 @@ class TestConnect(unittest.TestCase):
         }
         res = request_connect("http://httpbin.org/anything", json=json)
         self.assertEqual(res.status_code, 200, "Could not make normal request via connect")   
-        self.assertEqual(res.json(), json, "Json did not match")
+        self.assertEqual(res.json().get("json"), json, "Json did not match")
 
 
 def request_connect(url: str, json = {}, app_id: str = "app1.proxy1.broker", app_secret: str = "App1Secret", proxy_url: str = "http://localhost:8062") -> requests.Response:
