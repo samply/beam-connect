@@ -1,10 +1,10 @@
-use std::pin::Pin;
+use std::io;
 
-use futures::{TryStreamExt, pin_mut, Future, Stream};
+use futures::{TryStreamExt, pin_mut, Future, Stream, StreamExt};
 use hyper::{Client, client::HttpConnector, Request, header, StatusCode, body, Response, Body, Uri};
 use log::{info, warn, debug};
 use serde_json::Value;
-use shared::{MsgTaskRequest, MsgTaskResult, MsgId,beam_id::{BeamId,AppId}, WorkStatus, Plain, http_client::SamplyHttpClient};
+use shared::{MsgTaskRequest, MsgTaskResult, MsgId, beam_id::{BeamId, AppId}, WorkStatus, Plain, http_client::SamplyHttpClient, sse_event::SseEventType};
 
 use crate::{config::Config, errors::BeamConnectError, msg::{IsValidHttpTask, HttpResponse}};
 
@@ -17,6 +17,27 @@ pub(crate) async fn process_requests(config: Config, client: SamplyHttpClient) -
 
         send_reply(&task, &config, &client, resp).await?;
     }
+
+    Ok(())
+}
+
+pub(crate) async fn process_requests_stream(config: &Config, client: &SamplyHttpClient) -> Result<(), BeamConnectError> {
+    
+    let tasks = stream_tasks(config, client).await?; 
+    pin_mut!(tasks);
+
+    while let Some(task) = tasks.next().await {
+        match task {
+            Ok(task) => {
+                let resp = execute_http_task(&task, config, client).await?;
+
+                send_reply(&task, config, client, resp).await?;
+            }
+            Err(e) => {
+                warn!("Streamed an error: {e}");
+            }
+        }
+    };
 
     Ok(())
 }
@@ -112,7 +133,7 @@ async fn fetch_requests(config: &Config, client: &SamplyHttpClient) -> Result<Ve
 
 async fn stream_tasks(config: &Config, client: &SamplyHttpClient) -> Result<impl Stream<Item = Result<MsgTaskRequest, BeamConnectError>>, BeamConnectError> {
     let req_to_proxy = Request::builder()
-        .uri(format!("{}v1/tasks?to={}&wait_count=1&filter=todo", config.proxy_url, config.my_app_id))
+        .uri(format!("{}v1/tasks?to={}&wait_count=8&filter=todo", config.proxy_url, config.my_app_id))
         .header(header::AUTHORIZATION, config.proxy_auth.clone())
         .header(header::ACCEPT, "text/event-stream")
         .body(body::Body::empty())?;
@@ -131,15 +152,15 @@ async fn stream_tasks(config: &Config, client: &SamplyHttpClient) -> Result<impl
     
 
     let task_stream = async_stream::stream! {
-        let incoming = resp.body_mut().into_async_read();
-        let reader = async_sse::decode(incoming);
+        let incoming = resp.body_mut().map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string())).into_async_read();
+        let mut reader = async_sse::decode(incoming);
 
         while let Some(event) = reader.next().await {
             let event = match event {
                 Ok(event) => event,
                 Err(err) => {
                     warn!("Failed to get event from stream. {err}");
-                    yield Err(BeamConnectError::ProxyHyperError);
+                    yield Err(BeamConnectError::ProxyOtherError("Got error event from stream".to_string()));
                     continue;
                 }
             };
@@ -147,16 +168,22 @@ async fn stream_tasks(config: &Config, client: &SamplyHttpClient) -> Result<impl
             use async_sse::Event::*;
             match event {
                 Retry(_dur) => {
-                    error!("Got a retry message from the Proxy, which is not yet supported.");
+                    warn!("Got a retry message from the Proxy, which is not yet supported.");
                 },
                 Message(event) => {
                     match event.name().parse().expect("This is currently infallible") {
                         SseEventType::NewTask => {
                             match serde_json::from_slice(&event.into_bytes()) {
-                                Err(e) => warn!("Failed to deserialize a Task {e}"),
+                                Err(e) => {
+                                    warn!("Failed to deserialize a Task {e}");
+                                    continue;
+                                },
                                 Ok(task) => yield Ok(task),
                             };
-                        }
+                        },
+                        other => {
+                            warn!("Got other event {}", other.as_ref())
+                        } 
                     }
                 }
             }

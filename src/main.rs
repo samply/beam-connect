@@ -34,7 +34,7 @@ async fn main() -> Result<(), Box<dyn Error>>{
     let http_executor = tokio::task::spawn(async move {
         loop {
             debug!("Waiting for next request ...");
-            if let Err(e) = logic_reply::process_requests(config2.clone(), client2.clone()).await {
+            if let Err(e) = logic_reply::process_requests_stream(&config2, &client2).await {
                 warn!("Error in processing request: {e}. Will continue with the next one.");
             }
         }
