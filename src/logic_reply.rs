@@ -1,6 +1,7 @@
+use std::pin::Pin;
+
+use futures::{TryStreamExt, pin_mut, Future, Stream};
 use hyper::{Client, client::HttpConnector, Request, header, StatusCode, body, Response, Body, Uri};
-use hyper_proxy::ProxyConnector;
-use hyper_tls::HttpsConnector;
 use log::{info, warn, debug};
 use serde_json::Value;
 use shared::{MsgTaskRequest, MsgTaskResult, MsgId,beam_id::{BeamId,AppId}, WorkStatus, Plain, http_client::SamplyHttpClient};
@@ -107,4 +108,61 @@ async fn fetch_requests(config: &Config, client: &SamplyHttpClient) -> Result<Ve
     let msgs = msgs.unwrap();
     debug!("Broker gave us {} tasks: {:?}", msgs.len(), msgs.first());
     Ok(msgs)
+}
+
+async fn stream_tasks(config: &Config, client: &SamplyHttpClient) -> Result<impl Stream<Item = Result<MsgTaskRequest, BeamConnectError>>, BeamConnectError> {
+    let req_to_proxy = Request::builder()
+        .uri(format!("{}v1/tasks?to={}&wait_count=1&filter=todo", config.proxy_url, config.my_app_id))
+        .header(header::AUTHORIZATION, config.proxy_auth.clone())
+        .header(header::ACCEPT, "text/event-stream")
+        .body(body::Body::empty())?;
+    info!("Requesting {req_to_proxy:?}");
+    let mut resp = client.request(req_to_proxy).await
+        .map_err(BeamConnectError::ProxyHyperError)?;
+    match resp.status() {
+        StatusCode::OK => {
+            info!("Got request: {:?}", resp);
+        },
+        _ => {
+            return Err(BeamConnectError::ProxyOtherError(format!("Got response code {}", resp.status())));
+        }
+    };
+
+    
+
+    let task_stream = async_stream::stream! {
+        let incoming = resp.body_mut().into_async_read();
+        let reader = async_sse::decode(incoming);
+
+        while let Some(event) = reader.next().await {
+            let event = match event {
+                Ok(event) => event,
+                Err(err) => {
+                    warn!("Failed to get event from stream. {err}");
+                    yield Err(BeamConnectError::ProxyHyperError);
+                    continue;
+                }
+            };
+
+            use async_sse::Event::*;
+            match event {
+                Retry(_dur) => {
+                    error!("Got a retry message from the Proxy, which is not yet supported.");
+                },
+                Message(event) => {
+                    match event.name().parse().expect("This is currently infallible") {
+                        SseEventType::NewTask => {
+                            match serde_json::from_slice(&event.into_bytes()) {
+                                Err(e) => warn!("Failed to deserialize a Task {e}"),
+                                Ok(task) => yield Ok(task),
+                            };
+                        }
+                    }
+                }
+            }
+            continue;
+        };
+    };
+
+    Ok(task_stream)
 }
