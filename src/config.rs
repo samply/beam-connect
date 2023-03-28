@@ -84,6 +84,7 @@ impl CentralMapping {
     }
 }
 
+/// Maps an Authority to a given Beam App
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub(crate) struct Site {
     pub(crate) id: String,
@@ -108,6 +109,7 @@ impl LocalMapping {
     }
 }
 
+/// Maps an external authority to some internal authority if the requesting App is allowed to
 #[derive(Clone,Deserialize,Debug)]
 pub(crate) struct LocalMappingEntry {
     #[serde(with = "http_serde::authority", rename="external")]
