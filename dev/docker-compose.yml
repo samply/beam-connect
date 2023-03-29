@@ -44,6 +44,8 @@ services:
       PRIVKEY_FILE: /run/secrets/proxy1.pem
       BIND_ADDR: 0.0.0.0:8081
       RUST_LOG: ${RUST_LOG}
+      NO_PROXY: broker
+      no_proxy: broker
     secrets:
       - proxy1.pem
       - root.crt.pem
@@ -64,6 +66,8 @@ services:
       PROXY_APIKEY: ${APP_KEY}
       DISCOVERY_URL: "./map/example_central_test.json"
       RUST_LOG: ${RUST_LOG}
+      NO_PROXY: proxy1
+      no_proxy: proxy1
   connect2:
    depends_on:
      - proxy2
@@ -83,6 +87,8 @@ services:
      DISCOVERY_URL: "./map/example_central_test.json"
      LOCAL_TARGETS_FILE: "./map/example_local_test.json"
      RUST_LOG: ${RUST_LOG}
+     NO_PROXY: proxy2
+     no_proxy: proxy2
   proxy2:
     depends_on: [broker]
     image: samply/beam-proxy:${TAG}
@@ -98,6 +104,8 @@ services:
       PRIVKEY_FILE: /run/secrets/proxy2.pem
       BIND_ADDR: 0.0.0.0:8082
       RUST_LOG: ${RUST_LOG}
+      NO_PROXY: broker
+      no_proxy: broker
     secrets:
       - proxy2.pem
       - root.crt.pem
