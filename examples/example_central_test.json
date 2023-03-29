@@ -1,0 +1,10 @@
+{
+    "sites": [
+        {
+            "id": "C2",
+            "name": "connect2",
+            "virtualhost": "httpbin.org",
+            "beamconnect": "app2.proxy2.broker"
+        }
+    ]
+}

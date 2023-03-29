@@ -1,0 +1,118 @@
+version: "3.7"
+services:
+  vault:
+    image: vault
+    ports:
+      - 127.0.0.1:8200:8200
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_TOKEN}
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+      VAULT_ADDR: http://0.0.0.0:8200
+    volumes:
+      - ./pki:/pki
+    networks:
+      - default
+  broker:
+    depends_on: [vault]
+    image: samply/beam-broker:${TAG}
+    ports:
+      - 8080:8080
+    environment:
+      BROKER_URL: ${BROKER_URL}
+      PKI_ADDRESS: http://vault:8200
+      no_proxy: vault
+      NO_PROXY: vault
+      PRIVKEY_FILE: /run/secrets/dummy.pem
+      BIND_ADDR: 0.0.0.0:8080
+      RUST_LOG: ${RUST_LOG}
+    secrets:
+      - pki.secret
+      - dummy.pem
+      - root.crt.pem
+  proxy1:
+    depends_on: [broker]
+    image: samply/beam-proxy:${TAG}
+    ports:
+      - 8081:8081
+    environment:
+      BROKER_URL: ${BROKER_URL}
+      PROXY_ID: ${PROXY1_ID}
+      APP_0_ID: ${APP1_ID_SHORT}
+      APP_0_KEY: ${APP_KEY}
+      PRIVKEY_FILE: /run/secrets/proxy1.pem
+      BIND_ADDR: 0.0.0.0:8081
+      RUST_LOG: ${RUST_LOG}
+      NO_PROXY: broker
+      no_proxy: broker
+    secrets:
+      - proxy1.pem
+      - root.crt.pem
+  connect1:
+    depends_on:
+      - proxy1
+    build:
+      context: ../
+      dockerfile: Dockerfile.ci
+    image: samply/beam-connect:${TAG}
+    ports:
+      - 8062:8062
+    volumes:
+      - ../examples/:/map
+    environment:
+      PROXY_URL: "http://proxy1:8081"
+      APP_ID: ${APP1_P1}
+      PROXY_APIKEY: ${APP_KEY}
+      DISCOVERY_URL: "./map/example_central_test.json"
+      RUST_LOG: ${RUST_LOG}
+      NO_PROXY: proxy1
+      no_proxy: proxy1
+  connect2:
+   depends_on:
+     - proxy2
+   build:
+     context: ../
+     dockerfile: Dockerfile.ci
+   image: samply/beam-connect:${TAG}
+   ports:
+     - 8063:8063
+   volumes:
+     - ../examples/:/map
+   environment:
+     PROXY_URL: "http://proxy2:8082"
+     BIND_ADDR: 0.0.0.0:8063
+     APP_ID: ${APP2_P2}
+     PROXY_APIKEY: ${APP_KEY}
+     DISCOVERY_URL: "./map/example_central_test.json"
+     LOCAL_TARGETS_FILE: "./map/example_local_test.json"
+     RUST_LOG: ${RUST_LOG}
+     NO_PROXY: proxy2
+     no_proxy: proxy2
+  proxy2:
+    depends_on: [broker]
+    image: samply/beam-proxy:${TAG}
+    ports:
+      - 8082:8082
+    environment:
+      BROKER_URL: ${BROKER_URL}
+      PROXY_ID: ${PROXY2_ID}
+      APP_0_ID: ${APP2_ID_SHORT}
+      APP_0_KEY: ${APP_KEY}
+      PRIVKEY_FILE: /run/secrets/proxy2.pem
+      BIND_ADDR: 0.0.0.0:8082
+      RUST_LOG: ${RUST_LOG}
+      NO_PROXY: broker
+      no_proxy: broker
+    secrets:
+      - proxy2.pem
+      - root.crt.pem
+secrets:
+  pki.secret:
+    file: ./pki/pki.secret
+  proxy1.pem:
+    file: ./pki/${PROXY1_ID_SHORT}.priv.pem
+  proxy2.pem:
+    file: ./pki/${PROXY2_ID_SHORT}.priv.pem
+  dummy.pem:
+    file: ./pki/dummy.priv.pem
+  root.crt.pem:
+    file: ./pki/root.crt.pem

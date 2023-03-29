@@ -30,7 +30,7 @@ pub(crate) trait IsValidHttpTask {
 
 impl IsValidHttpTask for MsgTaskRequest {
     fn http_request(&self) -> Result<HttpRequest,BeamConnectError> {
-        let req_struct: HttpRequest = serde_json::from_str(&self.body)?;
+        let req_struct: HttpRequest = serde_json::from_str(self.body.body.as_ref().ok_or(BeamConnectError::ReplyInvalid("MsgTaskRequest had no content.".to_string()))?)?;
         if false { // TODO
             return Err(BeamConnectError::IdNotAuthorizedToAccessUrl(self.from.clone(), req_struct.url));
         }

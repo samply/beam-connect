@@ -1,0 +1,7 @@
+[
+    {
+        "external": "httpbin.org",
+        "internal": "httpbin.org",
+        "allowed": ["app1.proxy1.broker"]
+    }
+]

@@ -1,0 +1,111 @@
+#!/bin/bash -e
+
+# https://stackoverflow.com/questions/59895/
+SOURCE=${BASH_SOURCE[0]}
+while [ -L "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
+  DIR=$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )
+  SOURCE=$(readlink "$SOURCE")
+  [[ $SOURCE != /* ]] && SOURCE=$DIR/$SOURCE # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
+done
+SD=$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )
+
+cd $SD
+
+export PROXY1_ID=${PROXY1_ID:-proxy1.broker}
+export PROXY2_ID=${PROXY2_ID:-proxy2.broker}
+export PROXY1_ID_SHORT=$(echo $PROXY1_ID | cut -d '.' -f 1)
+export PROXY2_ID_SHORT=$(echo $PROXY2_ID | cut -d '.' -f 1)
+export BROKER_ID=$(echo $PROXY1_ID | cut -d '.' -f 2-)
+export BROKER_URL=http://broker:8080
+export APP1_ID_SHORT=app1
+export APP2_ID_SHORT=app2
+export APP1_P1=${APP1_ID_SHORT}.$PROXY1_ID
+export APP2_P1=${APP2_ID_SHORT}.$PROXY1_ID
+export APP1_P2=${APP1_ID_SHORT}.$PROXY2_ID
+export APP2_P2=${APP2_ID_SHORT}.$PROXY2_ID
+export APP_KEY=App1Secret
+export RUST_LOG=${RUST_LOG:-info}
+
+export P1="http://localhost:8081" # for scripts
+export P2="http://localhost:8082" # for scripts
+
+export VAULT_TOKEN=$(echo $RANDOM | md5sum | head -c 20; echo;)
+
+export ARCH=$(docker version --format "{{.Server.Arch}}")
+export TAG=${TAG:-develop}
+
+function image_for_docker() {
+     # Pick the correct Ubuntu version for the Docker image,
+     # so the locally-built rust binary works regarding libssl
+     if [[ "$(pkg-config --modversion libssl)" =~ ^3.* ]]; then
+          echo "ubuntu:latest" # Use libssl3
+     else
+          echo -n "" # Don't change (uses libssl1.1)
+     fi
+}
+
+export IMGNAME="$(image_for_docker)"
+
+function build() {
+    BUILD_DOCKER=0
+    BACK=$(pwd)
+    cd $SD/..
+    CONNECT=./target/debug/connect
+    if [ ! -x ./artifacts/binaries-$ARCH ]; then
+        echo "Binaries missing -- building ..."
+        BUILD="$(cargo build --message-format=json)"
+        echo "Will rebuild docker image since binaries had not been there."
+        mkdir -p artifacts/binaries-$ARCH
+        rsync "$CONNECT" artifacts/binaries-$ARCH/
+        BUILD_DOCKER=1
+    elif [ -z "$(docker images -q samply/beam-broker:$TAG)" ] || [ -z "$(docker images -q samply/beam-proxy:$TAG)" ]; then
+        echo "Will rebuild docker image since it is missing."
+        BUILD_DOCKER=1
+    elif [ -x ./target ]; then
+        echo "Checking for changed Rust source code ..."
+        BUILD="$(cargo build --message-format=json)"
+        if echo $BUILD | jq 'select(.fresh==false)' | grep -q 'fresh'; then
+            echo "Will rebuild docker image due to changes in rust binaries."
+            rsync "$CONNECT" artifacts/binaries-$ARCH/
+            BUILD_DOCKER=1
+        fi
+    fi
+    if [ $BUILD_DOCKER -eq 1 ]; then
+        build_docker
+    else
+        echo "Not rebuilding docker image since nothing has changed."
+    fi
+    cd $BACK
+}
+
+function build_docker() {
+    BACK2=$(pwd)
+    cd $SD
+    if [ -z "$IMGNAME" ]; then
+        docker-compose build --build-arg TARGETARCH=$ARCH
+    else
+        docker-compose build --build-arg TARGETARCH=$ARCH --build-arg IMGNAME=$IMGNAME
+    fi
+    cd $BACK2
+}
+
+function clean() {
+    stop
+    rm -rfv artifacts/
+}
+
+function stop {
+    docker-compose down
+    rm -fv pki/*.pem pki/*.json pki/pki.secret
+    pki/pki clean
+}
+
+function start {
+    clean
+    pki/pki devsetup
+    echo "$VAULT_TOKEN" > ./pki/pki.secret
+    build
+    docker-compose up --no-build --no-recreate --abort-on-container-exit
+}
+
+start

@@ -5,6 +5,7 @@ use hyper::{body, Body, service::{service_fn, make_service_fn}, Request, Respons
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
 use log::{info, error, debug, warn};
+use shared::http_client::SamplyHttpClient;
 
 mod msg;
 mod example_targets;
@@ -41,21 +42,19 @@ async fn main() -> Result<(), Box<dyn Error>>{
 
     let config = Arc::new(config.clone());
 
-    let make_service = 
-        make_service_fn(|_conn: &AddrStream| {
-            // let remote_addr = conn.remote_addr();
-            let client = client.clone();
-            let config = config.clone();
-            async {
-                Ok::<_, Infallible>(service_fn(move |req|
-                    handler_http_wrapper(req, config.clone(), client.clone())))
-            }
+    let make_service = make_service_fn(|_conn: &AddrStream| {
+        // let remote_addr = conn.remote_addr();
+        let client = client.clone();
+        let config = config.clone();
+        async {
+            Ok::<_, Infallible>(service_fn(move |req|
+                handler_http_wrapper(req, config.clone(), client.clone())))
+        }
     });
 
-    let server =
-        Server::bind(&listen)
+    let server = Server::bind(&listen)
         .serve(make_service)
-        .with_graceful_shutdown(shutdown_signal());
+        .with_graceful_shutdown(shared::graceful_shutdown::wait_for_signal());
 
     if let Err(e) = server.await {
         eprintln!("server error: {}", e);
@@ -69,7 +68,7 @@ async fn main() -> Result<(), Box<dyn Error>>{
 async fn handler_http_wrapper(
     req: Request<Body>,
     config: Arc<Config>,
-    client: Client<ProxyConnector<HttpsConnector<HttpConnector>>>
+    client: SamplyHttpClient
 ) -> Result<Response<Body>, Infallible> {
     match logic_ask::handler_http(req, config, client).await {
         Ok(e) => Ok(e),
