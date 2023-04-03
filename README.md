@@ -85,7 +85,7 @@ A mishap in communication will be returned as appropriate HTTP replies.
 
 #### Site Discovery
 
-As described in the [command line parameter list](#run-as-an-application), the central cite discovery is fetched from a given URL. However, to spare the local services from the need to express outward facing connections themselves, Samply.Beam.Connect exports this received information as a local REST endpoint: `GET http://<beam_connect_url>:<beam_connect_port>/sites`. Note, that the information is only fetched at startup and remains static for the program's lifetime.
+As described in the [command line parameter list](#run-as-an-application), the central cite discovery is fetched from a given URL or local json file. However, to spare the local services from the need to express outward facing connections themselves, Samply.Beam.Connect exports this received information as a local REST endpoint: `GET http://<beam_connect_url>:<beam_connect_port>/sites`. Note, that the information is only fetched at startup and remains static for the program's lifetime.
 
 ## Notes
 At the moment Samply.Beam.Connect does not implement streaming and does not support HTTPS connections. In the intended usage scenario, both Samply.Beam.Connect and Samply.Beam.Proxy are positioned right next to each other in the same privileged network and thus speak plain HTTP. Of course, for outgoing traffic, the Samply.Proxy signs and encrypts the payloads on its own.

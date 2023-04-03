@@ -1,2 +1,5 @@
 /target
 **/Cargo.lock
+dev/pki/*
+!dev/pki/pki
+artifacts/
