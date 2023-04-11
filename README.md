@@ -34,7 +34,7 @@ The following command line parameters are required:
  * `PROXY_URL`: The URL of the local Samply.Proxy which is used to connect to the Samply.Broker
  * `APP_ID`: The BeamId of the Beam.Connect application 
  * `LOCAL_TARGETS_FILE`: The path to the local service resolution file (see [Routing Section](#Request-Routing)).
- * `DISCOVERY_URL`: The URL that is queried to receive the central service discovery this may also be a local file (see [Routing Section](#Request-Routing)).
+ * `DISCOVERY_URL`: The URL (or local file) to be is queried to receive the central service discovery (see [Routing Section](#Request-Routing)).
  
 The following command line parameter is only used in Receiver mode (see [Usage Section](#usage)):
  * `PROXY_APIKEY`: In Receiver Mode, the API key with which this Beam.Connector is registered for listening at the Samply.Broker
