@@ -134,6 +134,7 @@ function start_bg {
             fi
         done
     done
+    sleep 4
     echo "Services are up!"
 }
 
