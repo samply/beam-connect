@@ -103,6 +103,11 @@ jobs:
           path: artifacts/binaries-amd64/
       - name: Start containers
         run: ./dev/start bg
+      - name: Wait for containers
+        run: |
+          echo $(curl -s -o /tmp/body -w '%{response_code}' http://localhost:8081/v1/health)
+          sleep 10
+          echo $(curl -s -o /tmp/body -w '%{response_code}' http://localhost:8081/v1/health)
       - name: Run tests
         run: python ./dev/test.py
 
