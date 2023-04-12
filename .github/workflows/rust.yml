@@ -108,6 +108,7 @@ jobs:
           echo $(curl -s -o /tmp/body -w '%{response_code}' http://localhost:8062/v1/health)
           sleep 10
           echo $(curl -s -o /tmp/body -w '%{response_code}' http://localhost:8063/v1/health)
+          docker logs dev-connect1-1
       - name: Run tests
         run: python ./dev/test.py
 
