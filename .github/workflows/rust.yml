@@ -103,11 +103,11 @@ jobs:
           path: artifacts/binaries-amd64/
       - name: Start containers
         run: ./dev/start ci
-      - name: Show logs
-        working-directory: ./dev
-        run: |
-          sleep 3
-          docker compose logs
+      # - name: Show logs
+      #   working-directory: ./dev
+      #   run: |
+      #     sleep 3
+      #     docker compose logs
       - name: Run tests
         run: python ./dev/test.py
 
