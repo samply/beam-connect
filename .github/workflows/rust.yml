@@ -101,9 +101,10 @@ jobs:
         with:
           name: binaries-amd64
           path: artifacts/binaries-amd64/
-      - run: |
-          ./dev/start bg
-          python ./dev/test.py
+      - name: Start containers
+        run: ./dev/start bg
+      - name: Run tests
+        run: python ./dev/test.py
 
   docker:
     needs: [ build-rust, pre-check, test ]
