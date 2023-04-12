@@ -103,12 +103,11 @@ jobs:
           path: artifacts/binaries-amd64/
       - name: Start containers
         run: ./dev/start bg
-      - name: Wait for containers
+      - name: Show logs
+        working-directory: ./dev
         run: |
-          echo $(curl -s -o /tmp/body -w '%{response_code}' http://localhost:8062/v1/health)
-          sleep 10
-          echo $(curl -s -o /tmp/body -w '%{response_code}' http://localhost:8063/v1/health)
-          docker logs dev-connect1-1
+          sleep 3
+          docker compose logs
       - name: Run tests
         run: python ./dev/test.py
 
