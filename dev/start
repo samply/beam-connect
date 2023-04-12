@@ -58,7 +58,7 @@ function build() {
         mkdir -p artifacts/binaries-$ARCH
         rsync "$CONNECT" artifacts/binaries-$ARCH/
         BUILD_DOCKER=1
-    elif [ -z "$(docker images -q samply/beam-broker:$TAG)" ] || [ -z "$(docker images -q samply/beam-proxy:$TAG)" ]; then
+    elif [ -z "$(docker images -q samply/beam-connect:$TAG)" ]; then
         echo "Will rebuild docker image since it is missing."
         BUILD_DOCKER=1
     elif [ -x ./target ]; then
@@ -108,7 +108,8 @@ function start {
     docker-compose up --no-build --no-recreate --abort-on-container-exit
 }
 
-function start_bg {
+function start_ci {
+    unset IMGNAME
     clean
     pki/pki devsetup
     echo "$VAULT_TOKEN" > ./pki/pki.secret
@@ -138,8 +139,8 @@ function start_bg {
 }
 
 case "$1" in
-  bg)
-    start_bg
+  ci)
+    start_ci
     ;;
   *)
     start

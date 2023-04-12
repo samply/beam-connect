@@ -102,7 +102,7 @@ jobs:
           name: binaries-amd64
           path: artifacts/binaries-amd64/
       - name: Start containers
-        run: ./dev/start bg
+        run: ./dev/start ci
       - name: Show logs
         working-directory: ./dev
         run: |
