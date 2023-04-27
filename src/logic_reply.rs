@@ -1,7 +1,7 @@
 use hyper::{Client, client::HttpConnector, Request, header, StatusCode, body, Response, Body, Uri};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
-use log::{info, warn, debug};
+use tracing::{info, warn, debug};
 use serde_json::Value;
 use shared::{MsgTaskRequest, MsgTaskResult, MsgId,beam_id::{BeamId,AppId}, WorkStatus, Plain, http_client::SamplyHttpClient};
 
