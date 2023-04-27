@@ -4,7 +4,7 @@ use config::Config;
 use hyper::{body, Body, service::{service_fn, make_service_fn}, Request, Response, Server, header::{HeaderName, self, ToStrError}, Uri, http::uri::Authority, server::conn::AddrStream, Client, client::HttpConnector};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
-use log::{info, error, debug, warn};
+use tracing::{info, error, debug, warn};
 use shared::http_client::SamplyHttpClient;
 
 mod msg;

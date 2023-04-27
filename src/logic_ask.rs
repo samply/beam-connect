@@ -3,7 +3,7 @@ use std::time::{Duration, SystemTime};
 use hyper::{Request, Body, Client, client::HttpConnector, Response, header, StatusCode, body, Uri};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
-use log::{info, debug, warn, error};
+use tracing::{info, debug, warn, error};
 use serde_json::Value;
 use shared::http_client::SamplyHttpClient;
 use shared::{beam_id::AppId, MsgTaskResult, MsgTaskRequest};
