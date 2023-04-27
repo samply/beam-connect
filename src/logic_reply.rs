@@ -28,14 +28,18 @@ async fn send_reply(task: &MsgTaskRequest, config: &Config, client: &SamplyHttpC
         headers: resp.headers().clone(),
         body: String::from_utf8(body.to_vec())?
     };
-    let http_reply = serde_json::to_string(&http_reply)?;
+    if !resp.status().is_success() {
+        warn!("Httptask returned with status {}. Reporting failiure to broker.", resp.status());
+        warn!("Response body was: {}", http_reply.body);
+    }
+    let http_reply_string = serde_json::to_string(&http_reply)?;
     let msg = MsgTaskResult {
         from: config.my_app_id.clone().into(),
         to: vec![task.from.clone()],
         task: task.id,
-        status: WorkStatus::Succeeded,
+        status: WorkStatus::Succeeded, // TODO: we may want to return something else if we were not successfull
         metadata: Value::Null,
-        body: Plain::from(http_reply),
+        body: Plain::from(http_reply_string),
     };
     let req_to_proxy = Request::builder()
         .method("PUT")
@@ -55,8 +59,13 @@ async fn send_reply(task: &MsgTaskRequest, config: &Config, client: &SamplyHttpC
 async fn execute_http_task(task: &MsgTaskRequest, config: &Config, client: &SamplyHttpClient) -> Result<Response<Body>, BeamConnectError> {
     let task_req = task.http_request()?;
     info!("{} | {} {}", task.from, task_req.method, task_req.url);
-    let target = config.targets_local.get(task_req.url.authority().unwrap()) //TODO unwrap
-        .ok_or(BeamConnectError::CommunicationWithTargetFailed(String::from("Target not defined")))?;
+    let target = config
+        .targets_local
+        .get(task_req.url.authority().unwrap()) //TODO unwrap
+        .ok_or_else(|| {
+            warn!("Lookup of local target {} failed", task_req.url.authority().unwrap());
+            BeamConnectError::CommunicationWithTargetFailed(String::from("Target not defined"))
+        })?;
     if !target.allowed.contains(&AppId::try_from(&task.from).or(Err(BeamConnectError::IdNotAuthorizedToAccessUrl(task.from.clone(), task_req.url.clone())))?) {
         return Err(BeamConnectError::IdNotAuthorizedToAccessUrl(task.from.clone(), task_req.url.clone()));
     }
