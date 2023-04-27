@@ -2,7 +2,7 @@ use std::{error::Error, path::PathBuf, fs::File, str::FromStr};
 
 use clap::Parser;
 use hyper::{Uri, http::uri::{Authority, Scheme}};
-use log::info;
+use tracing::info;
 use serde::{Serialize, Deserialize};
 use shared::{beam_id::{AppId, BeamId, app_to_broker_id, BrokerId}, http_client::{SamplyHttpClient, self}};
 

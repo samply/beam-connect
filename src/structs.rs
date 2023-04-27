@@ -1,7 +1,7 @@
 use std::{string::FromUtf8Error, error::Error, fmt::Display};
 
 use hyper::{StatusCode, header::ToStrError, http::uri::Authority};
-use log::error;
+use tracing::error;
 use shared::errors::SamplyBeamError;
 
 #[derive(Debug)]
