@@ -18,7 +18,7 @@ mod banner;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>>{
-    pretty_env_logger::init();
+    shared::logger::init_logger()?;
     banner::print_banner();
     let config = Config::load().await?;
     let config2 = config.clone();

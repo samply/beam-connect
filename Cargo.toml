@@ -32,7 +32,6 @@ hyper-proxy = "0.9.1"
 mz-http-proxy = { version = "0.1.0", features = ["hyper"] }
 
 log = "*"
-pretty_env_logger = "*"
 
 serde = "*"
 serde_json = "*"
