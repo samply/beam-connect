@@ -51,7 +51,10 @@ pub(crate) async fn handler_http(
     }
 
     let target = &targets.get(uri.authority().unwrap()) //TODO unwrap
-        .ok_or(StatusCode::UNAUTHORIZED)?
+        .ok_or_else(|| {
+            warn!("Failed to lookup virtualhost in central mapping: {}", uri.authority().unwrap());
+            StatusCode::UNAUTHORIZED
+        })?
         .beamconnect;
 
     info!("{method} {uri} via {target}");
