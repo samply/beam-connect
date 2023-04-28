@@ -12,7 +12,8 @@ pub(crate) async fn process_requests(config: Config, client: SamplyHttpClient) -
     let msgs = fetch_requests(&config, &client).await?;
 
     for task in msgs {
-        let resp = execute_http_task(&task, &config, &client).await?;
+        // If we fail to execute the http task we should report this as a failure to beam
+        let resp = execute_http_task(&task, &config, &client).await;
 
         send_reply(&task, &config, &client, resp).await?;
     }
@@ -20,26 +21,34 @@ pub(crate) async fn process_requests(config: Config, client: SamplyHttpClient) -
     Ok(())
 }
 
-async fn send_reply(task: &MsgTaskRequest, config: &Config, client: &SamplyHttpClient, mut resp: Response<Body>) -> Result<(), BeamConnectError> {
-    let body = body::to_bytes(resp.body_mut()).await
-        .map_err(BeamConnectError::FailedToReadTargetsReply)?;
-    let http_reply = HttpResponse {
-        status: resp.status(),
-        headers: resp.headers().clone(),
-        body: String::from_utf8(body.to_vec())?
+async fn send_reply(task: &MsgTaskRequest, config: &Config, client: &SamplyHttpClient, resp: Result<Response<Body>, BeamConnectError>) -> Result<(), BeamConnectError> {
+    let (reply_body, status) = match resp {
+        Ok(mut resp) => {
+            let body = body::to_bytes(resp.body_mut()).await
+                .map_err(BeamConnectError::FailedToReadTargetsReply)?;
+            let body = String::from_utf8(body.to_vec())?;
+            if !resp.status().is_success() {
+                warn!("Httptask returned with status {}. Reporting failiure to broker.", resp.status());
+                warn!("Response body was: {}", &body);
+            };
+            (serde_json::to_string(&HttpResponse {
+                status: resp.status(),
+                headers: resp.headers().clone(),
+                body
+            })?, WorkStatus::Succeeded)
+        },
+        Err(e) => {
+            warn!("Failed to execute http task. Err: {e}");
+            ("Error executing http task. See beam connect logs".to_string(), WorkStatus::PermFailed)
+        },
     };
-    if !resp.status().is_success() {
-        warn!("Httptask returned with status {}. Reporting failiure to broker.", resp.status());
-        warn!("Response body was: {}", http_reply.body);
-    }
-    let http_reply_string = serde_json::to_string(&http_reply)?;
     let msg = MsgTaskResult {
         from: config.my_app_id.clone().into(),
         to: vec![task.from.clone()],
         task: task.id,
-        status: WorkStatus::Succeeded, // TODO: we may want to return something else if we were not successfull
+        status,
         metadata: Value::Null,
-        body: Plain::from(http_reply_string),
+        body: Plain::from(reply_body),
     };
     let req_to_proxy = Request::builder()
         .method("PUT")
@@ -102,6 +111,7 @@ async fn fetch_requests(config: &Config, client: &SamplyHttpClient) -> Result<Ve
         StatusCode::OK => {
             info!("Got request: {:?}", resp);
         },
+        StatusCode::GATEWAY_TIMEOUT => return Err(BeamConnectError::ProxyTimeoutError),
         _ => {
             return Err(BeamConnectError::ProxyOtherError(format!("Got response code {}", resp.status())));
         }
