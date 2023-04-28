@@ -7,6 +7,8 @@ use hyper_tls::HttpsConnector;
 use tracing::{info, error, debug, warn};
 use shared::http_client::SamplyHttpClient;
 
+use crate::errors::BeamConnectError;
+
 mod msg;
 mod example_targets;
 mod config;
@@ -35,7 +37,11 @@ async fn main() -> Result<(), Box<dyn Error>>{
         loop {
             debug!("Waiting for next request ...");
             if let Err(e) = logic_reply::process_requests(config2.clone(), client2.clone()).await {
-                warn!("Error in processing request: {e}. Will continue with the next one.");
+                if let BeamConnectError::ProxyTimeoutError = e {
+                    debug!("{e}");
+                } else {
+                    warn!("Error in processing request: {e}. Will continue with the next one.");
+                }
             }
         }
     });
