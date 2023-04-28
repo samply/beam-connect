@@ -129,7 +129,7 @@ pub(crate) async fn handler_http(
     let result = task_results.pop().unwrap();
     let response_inner = match result.status {
         shared::WorkStatus::Succeeded => {
-            serde_json::from_str::<HttpResponse>(&result.body.body.ok_or({
+            serde_json::from_str::<HttpResponse>(&result.body.body.ok_or_else(|| {
                 warn!("Recieved one sucessfull result but it has no body");
                 StatusCode::BAD_GATEWAY
             })?)?
