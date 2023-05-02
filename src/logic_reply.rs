@@ -1,4 +1,4 @@
-use hyper::{Client, client::HttpConnector, Request, header, StatusCode, body, Response, Body, Uri};
+use hyper::{Client, client::HttpConnector, Request, header, StatusCode, body, Response, Body, Uri, Method};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
 use tracing::{info, warn, debug};
@@ -77,6 +77,10 @@ async fn execute_http_task(task: &MsgTaskRequest, config: &Config, client: &Samp
         })?;
     if !target.allowed.contains(&AppId::try_from(&task.from).or(Err(BeamConnectError::IdNotAuthorizedToAccessUrl(task.from.clone(), task_req.url.clone())))?) {
         return Err(BeamConnectError::IdNotAuthorizedToAccessUrl(task.from.clone(), task_req.url.clone()));
+    }
+    // if task_req.url.sheme().is_none() {
+    if task_req.method == Method::CONNECT {
+        debug!("Connect Request URL: {:?}", task_req.url);
     }
     let uri = Uri::builder()
         .scheme(task_req.url.scheme().unwrap().as_str())
