@@ -4,7 +4,7 @@ use shared::MsgTaskRequest;
 
 use crate::errors::BeamConnectError;
 
-#[derive(Serialize,Deserialize)]
+#[derive(Serialize,Deserialize, Debug)]
 pub(crate) struct HttpRequest {
     #[serde(with = "hyper_serde")]
     pub(crate) method: Method,

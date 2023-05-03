@@ -1,6 +1,9 @@
 use std::{sync::Arc, str::FromStr};
 use std::time::{Duration, SystemTime};
+use hyper::Method;
 use hyper::http::HeaderValue;
+use hyper::server::conn::Http;
+use hyper::service::service_fn;
 use hyper::{Request, Body, Client, client::HttpConnector, Response, header, StatusCode, body, Uri};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
@@ -19,6 +22,7 @@ pub(crate) async fn handler_http(
     config: Arc<Config>,
     client: SamplyHttpClient
 ) -> Result<Response<Body>, MyStatusCode> {
+
     let targets = &config.targets_public;
     let method = req.method().to_owned();
     let uri = req.uri().to_owned();
@@ -180,6 +184,7 @@ async fn http_req_to_struct(req: Request<Body>, my_id: &AppId, target_id: &AppId
         headers,
         body,
     };
+    dbg!(&http_req);
     let mut msg = MsgTaskRequest::new(
         my_id.into(),
         vec![target_id.into()],

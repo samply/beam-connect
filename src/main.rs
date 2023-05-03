@@ -1,9 +1,11 @@
 use std::{net::SocketAddr, str::FromStr, convert::Infallible, string::FromUtf8Error, error::Error, fmt::Display, collections::{hash_map, HashMap}, sync::Arc};
 
 use config::Config;
-use hyper::{body, Body, service::{service_fn, make_service_fn}, Request, Response, Server, header::{HeaderName, self, ToStrError}, Uri, http::uri::Authority, server::conn::AddrStream, Client, client::HttpConnector};
+use hyper::{body, Body, service::{service_fn, make_service_fn}, Request, Response, Server, header::{HeaderName, self, ToStrError}, Uri, http::uri::Authority, server::conn::{AddrStream, Http}, Client, client::HttpConnector, Method};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
+use logic_ask::handler_http;
+use native_tls::Identity;
 use tracing::{info, error, debug, warn};
 use shared::http_client::SamplyHttpClient;
 
@@ -71,15 +73,39 @@ async fn main() -> Result<(), Box<dyn Error>>{
     Ok(())
 }
 
-async fn handler_http_wrapper(
+pub(crate) async fn handler_http_wrapper(
     req: Request<Body>,
     config: Arc<Config>,
     client: SamplyHttpClient
 ) -> Result<Response<Body>, Infallible> {
-    match logic_ask::handler_http(req, config, client).await {
-        Ok(e) => Ok(e),
-        Err(e) => Ok(Response::builder().status(e.code).body(body::Body::empty()).unwrap()),
+    // On https connections we want to emulate that we successfully connected to get the actual http request
+    if req.method() == Method::CONNECT {
+        tokio::spawn(async move {
+            match hyper::upgrade::on(req).await {
+                Ok(connection) => {
+                    let tls_connection = config.tls_acceptor.accept(connection).await.unwrap_or_else(|e| todo!());
+                    Http::new().serve_connection(tls_connection, service_fn(|req| {
+                        let client = client.clone();
+                        let config = config.clone();
+                        async move {
+                            match handler_http(req, config, client).await {
+                                Ok(e) => Ok::<_, Infallible>(e),
+                                Err(e) => Ok(Response::builder().status(e.code).body(body::Body::empty()).unwrap()),
+                            }
+                        }
+                    })).await.unwrap_or_else(|e| warn!("Failed to handle upgraded connection: {e}"));
+                },
+                Err(e) => warn!("Failed to upgrade connection: {e}"),
+            };
+        });
+        Ok(Response::new(Body::empty()))
+    } else {
+        match handler_http(req, config, client).await {
+            Ok(e) => Ok(e),
+            Err(e) => Ok(Response::builder().status(e.code).body(body::Body::empty()).unwrap()),
+        }
     }
+
 }
 
 async fn shutdown_signal() {

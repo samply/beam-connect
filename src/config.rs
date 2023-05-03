@@ -2,6 +2,7 @@ use std::{error::Error, path::PathBuf, fs::File, str::FromStr};
 
 use clap::Parser;
 use hyper::{Uri, http::uri::{Authority, Scheme}};
+use tokio_native_tls::{TlsAcceptor, native_tls::{self, Identity}};
 use tracing::info;
 use serde::{Serialize, Deserialize};
 use shared::{beam_id::{AppId, BeamId, app_to_broker_id, BrokerId}, http_client::{SamplyHttpClient, self}};
@@ -129,7 +130,8 @@ pub(crate) struct Config {
     pub(crate) targets_local: LocalMapping,
     pub(crate) targets_public: CentralMapping,
     pub(crate) expire: u64,
-    pub(crate) client: SamplyHttpClient
+    pub(crate) client: SamplyHttpClient,
+    pub(crate) tls_acceptor: TlsAcceptor
 }
 
 fn load_local_targets(broker_id: &BrokerId, local_target_path: &Option<PathBuf>) -> Result<LocalMapping,Box<dyn Error>> {
@@ -183,6 +185,9 @@ impl Config {
         let targets_public = load_public_targets(&client, &args.discovery_url).await?;
         let targets_local = load_local_targets(&broker_id, &args.local_targets_file)?;
 
+        let identity = Identity::from_pkcs8(pem, key)?;
+        let tls_acceptor = native_tls::TlsAcceptor::new(identity)?;
+
         Ok(Config {
             proxy_url: args.proxy_url,
             my_app_id: my_app_id.clone(),
@@ -191,7 +196,8 @@ impl Config {
             targets_local,
             targets_public,
             expire,
-            client
+            client,
+            tls_acceptor
         })
     }
 }
