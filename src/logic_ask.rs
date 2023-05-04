@@ -30,11 +30,12 @@ pub(crate) async fn handler_http(
     let method = req.method().to_owned();
     let uri = req.uri().to_owned();
     let Some(authority) = authority.as_ref().or(uri.authority()) else {
-        if uri.path() == "/sites" {
+        return if uri.path() == "/sites" {
             // Case 1 for sites request: no authority set and /sites
-            return respond_with_sites(targets);
+            respond_with_sites(targets)
+        } else {
+            Err(StatusCode::BAD_REQUEST.into())
         }
-        return Err(StatusCode::BAD_REQUEST.into())
     };
     let headers = req.headers_mut();
 
@@ -49,7 +50,8 @@ pub(crate) async fn handler_http(
     //     return Err(StatusCode::CONFLICT.into());
     // }
 
-    let Some(target) = &targets.get(authority)
+    let Some(target) = &targets
+        .get(authority)
         .map(|target| &target.beamconnect) else {
             return if uri.path() == "/sites" {
                 // Case 2: target not in sites and /sites
