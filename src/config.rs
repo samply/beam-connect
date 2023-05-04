@@ -1,4 +1,4 @@
-use std::{error::Error, path::PathBuf, fs::{File, read_to_string}, str::FromStr};
+use std::{error::Error, path::PathBuf, fs::{File, read_to_string}, str::FromStr, sync::Arc};
 
 use clap::Parser;
 use hyper::{Uri, http::uri::{Authority, Scheme}};
@@ -131,7 +131,7 @@ pub(crate) struct Config {
     pub(crate) targets_public: CentralMapping,
     pub(crate) expire: u64,
     pub(crate) client: SamplyHttpClient,
-    pub(crate) tls_acceptor: TlsAcceptor
+    pub(crate) tls_acceptor: Arc<TlsAcceptor>
 }
 
 fn load_local_targets(broker_id: &BrokerId, local_target_path: &Option<PathBuf>) -> Result<LocalMapping,Box<dyn Error>> {
@@ -190,7 +190,7 @@ impl Config {
             read_to_string("/etc/ssl/certs/ssl-cert-snakeoil.pem")?.as_bytes(),
             read_to_string("/etc/ssl/private/ssl-cert-snakeoil.key")?.as_bytes(),
         )?;
-        let tls_acceptor = native_tls::TlsAcceptor::new(identity)?.into();
+        let tls_acceptor = Arc::new(native_tls::TlsAcceptor::new(identity)?.into());
 
         Ok(Config {
             proxy_url: args.proxy_url,

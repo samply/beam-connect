@@ -36,7 +36,6 @@ pub(crate) async fn handler_http(
         }
         return Err(StatusCode::BAD_REQUEST.into())
     };
-    println!("{}", uri);
     let headers = req.headers_mut();
 
     headers.insert(header::VIA, format!("Via: Samply.Beam.Connect/0.1 {}", config.my_app_id).parse().unwrap());
@@ -183,7 +182,7 @@ async fn http_req_to_struct(req: Request<Body>, my_id: &AppId, target_id: &AppId
     let headers = req.headers().clone();
     let body = body::to_bytes(req).await
         .map_err(|e| {
-            println!("{e}");
+            warn!("Failed to read body: {e}");
             StatusCode::BAD_REQUEST
     })?;
     let body = String::from_utf8(body.to_vec())?;
