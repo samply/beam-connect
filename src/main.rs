@@ -5,7 +5,6 @@ use hyper::{body, Body, service::{service_fn, make_service_fn}, Request, Respons
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
 use logic_ask::handler_http;
-use native_tls::Identity;
 use tracing::{info, error, debug, warn};
 use shared::http_client::SamplyHttpClient;
 
@@ -83,7 +82,13 @@ pub(crate) async fn handler_http_wrapper(
         tokio::spawn(async move {
             match hyper::upgrade::on(req).await {
                 Ok(connection) => {
-                    let tls_connection = config.tls_acceptor.accept(connection).await.unwrap_or_else(|e| todo!());
+                    let tls_connection = match config.tls_acceptor.accept(connection).await {
+                        Err(e) => {
+                            warn!("Error accepting tls connection: {e}");
+                            return;
+                        },
+                        Ok(s) => s,
+                    };
                     Http::new().serve_connection(tls_connection, service_fn(|req| {
                         let client = client.clone();
                         let config = config.clone();

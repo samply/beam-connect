@@ -1,4 +1,4 @@
-use std::{error::Error, path::PathBuf, fs::File, str::FromStr};
+use std::{error::Error, path::PathBuf, fs::{File, read_to_string}, str::FromStr};
 
 use clap::Parser;
 use hyper::{Uri, http::uri::{Authority, Scheme}};
@@ -185,8 +185,12 @@ impl Config {
         let targets_public = load_public_targets(&client, &args.discovery_url).await?;
         let targets_local = load_local_targets(&broker_id, &args.local_targets_file)?;
 
-        let identity = Identity::from_pkcs8(pem, key)?;
-        let tls_acceptor = native_tls::TlsAcceptor::new(identity)?;
+        // TODO: Add this to cli options
+        let identity = Identity::from_pkcs8(
+            read_to_string("/etc/ssl/certs/ssl-cert-snakeoil.pem")?.as_bytes(),
+            read_to_string("/etc/ssl/private/ssl-cert-snakeoil.key")?.as_bytes(),
+        )?;
+        let tls_acceptor = native_tls::TlsAcceptor::new(identity)?.into();
 
         Ok(Config {
             proxy_url: args.proxy_url,

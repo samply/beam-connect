@@ -26,6 +26,7 @@ pub(crate) async fn handler_http(
     let targets = &config.targets_public;
     let method = req.method().to_owned();
     let uri = req.uri().to_owned();
+    println!("{}", uri);
     let headers = req.headers_mut();
 
     headers.insert(header::VIA, format!("Via: Samply.Beam.Connect/0.1 {}", config.my_app_id).parse().unwrap());
