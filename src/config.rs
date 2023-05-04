@@ -189,8 +189,11 @@ impl Config {
         let identity = Identity::from_pkcs8(
             read_to_string("/etc/ssl/certs/ssl-cert-snakeoil.pem")?.as_bytes(),
             read_to_string("/etc/ssl/private/ssl-cert-snakeoil.key")?.as_bytes(),
-        )?;
-        let tls_acceptor = Arc::new(native_tls::TlsAcceptor::new(identity)?.into());
+        ).expect("Failed to initialize identity for tls acceptor");
+        let tls_acceptor = Arc::new(native_tls::TlsAcceptor::new(identity)
+            .expect("Failed to initialize tls acceptor")
+            .into()
+        );
 
         Ok(Config {
             proxy_url: args.proxy_url,
