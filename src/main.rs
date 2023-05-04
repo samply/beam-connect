@@ -80,6 +80,7 @@ pub(crate) async fn handler_http_wrapper(
     // On https connections we want to emulate that we successfully connected to get the actual http request
     if req.method() == Method::CONNECT {
         tokio::spawn(async move {
+            let authority = req.uri().authority().cloned();
             match hyper::upgrade::on(req).await {
                 Ok(connection) => {
                     let tls_connection = match config.tls_acceptor.accept(connection).await {
@@ -90,10 +91,10 @@ pub(crate) async fn handler_http_wrapper(
                         Ok(s) => s,
                     };
                     Http::new().serve_connection(tls_connection, service_fn(|req| {
-                        let client = client.clone();
                         let config = config.clone();
+                        let authority = authority.clone();
                         async move {
-                            match handler_http(req, config, client).await {
+                            match handler_http(req, config, authority).await {
                                 Ok(e) => Ok::<_, Infallible>(e),
                                 Err(e) => Ok(Response::builder().status(e.code).body(body::Body::empty()).unwrap()),
                             }
@@ -105,19 +106,10 @@ pub(crate) async fn handler_http_wrapper(
         });
         Ok(Response::new(Body::empty()))
     } else {
-        match handler_http(req, config, client).await {
+        match handler_http(req, config, None).await {
             Ok(e) => Ok(e),
             Err(e) => Ok(Response::builder().status(e.code).body(body::Body::empty()).unwrap()),
         }
     }
 
-}
-
-async fn shutdown_signal() {
-    // Wait for the CTRL+C signal
-    info!("Starting ...");
-    tokio::signal::ctrl_c()
-        .await
-        .expect("failed to install CTRL+C signal handler");
-    info!("(1/2) Shutting down gracefully ...");
 }

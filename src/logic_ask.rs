@@ -2,6 +2,7 @@ use std::{sync::Arc, str::FromStr};
 use std::time::{Duration, SystemTime};
 use hyper::Method;
 use hyper::http::HeaderValue;
+use hyper::http::uri::{Authority, Scheme};
 use hyper::server::conn::Http;
 use hyper::service::service_fn;
 use hyper::{Request, Body, Client, client::HttpConnector, Response, header, StatusCode, body, Uri};
@@ -12,6 +13,7 @@ use serde_json::Value;
 use shared::http_client::SamplyHttpClient;
 use shared::{beam_id::AppId, MsgTaskResult, MsgTaskRequest};
 
+use crate::config::CentralMapping;
 use crate::{config::Config, structs::MyStatusCode, msg::{HttpRequest, HttpResponse}, errors::BeamConnectError};
 
 /// GET   http://some.internal.system?a=b&c=d
@@ -20,12 +22,20 @@ use crate::{config::Config, structs::MyStatusCode, msg::{HttpRequest, HttpRespon
 pub(crate) async fn handler_http(
     mut req: Request<Body>,
     config: Arc<Config>,
-    client: SamplyHttpClient
+    authority: Option<Authority>,
 ) -> Result<Response<Body>, MyStatusCode> {
 
+    let client = &config.client;
     let targets = &config.targets_public;
     let method = req.method().to_owned();
     let uri = req.uri().to_owned();
+    let Some(authority) = authority.as_ref().or(uri.authority()) else {
+        if uri.path() == "/sites" {
+            // Case 1 for sites request: no authority set and /sites
+            return respond_with_sites(targets);
+        }
+        return Err(StatusCode::BAD_REQUEST.into())
+    };
     println!("{}", uri);
     let headers = req.headers_mut();
 
@@ -40,30 +50,29 @@ pub(crate) async fn handler_http(
     //     return Err(StatusCode::CONFLICT.into());
     // }
 
-    // If the autority is empty (e.g. if localhost is used) or the authoroty is not in the routing
-    // table AND the path is /sites, return global routing table
-    if let Some(path) = uri.path_and_query() { 
-        if (uri.authority().is_none() || targets.get(uri.authority().unwrap()).is_none()) && path == "/sites" {
-            debug!("Central Site Discovery requested");
-            let body = body::Body::from(serde_json::to_string(targets)?);
-            let response = Response::builder()
-                .status(200)
-                .body(body)
-                .unwrap();
-            return Ok(response);
-
-        }
-    }
-
-    let target = &targets.get(uri.authority().unwrap()) //TODO unwrap
-        .ok_or_else(|| {
-            warn!("Failed to lookup virtualhost in central mapping: {}", uri.authority().unwrap());
-            StatusCode::UNAUTHORIZED
-        })?
-        .beamconnect;
+    let Some(target) = &targets.get(authority)
+        .map(|target| &target.beamconnect) else {
+            return if uri.path() == "/sites" {
+                // Case 2: target not in sites and /sites
+                respond_with_sites(targets)
+            } else {
+                warn!("Failed to lookup virtualhost in central mapping: {}", authority);
+                Err(StatusCode::UNAUTHORIZED.into())
+            }
+        };
 
     info!("{method} {uri} via {target}");
 
+    // Set the right authority as it might have been passed by the caller because it was a CONNECT request
+    *req.uri_mut() = {
+        let mut parts = req.uri().to_owned().into_parts();
+        parts.authority = Some(authority.clone());
+        parts.scheme = Some(Scheme::HTTPS);
+        Uri::from_parts(parts).map_err(|e| {
+            warn!("Could not transform uri authority: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+    };
     let msg = http_req_to_struct(req, &config.my_app_id, &target, &config.expire).await?;
 
     // Send to Proxy
@@ -185,7 +194,6 @@ async fn http_req_to_struct(req: Request<Body>, my_id: &AppId, target_id: &AppId
         headers,
         body,
     };
-    dbg!(&http_req);
     let mut msg = MsgTaskRequest::new(
         my_id.into(),
         vec![target_id.into()],
@@ -197,4 +205,16 @@ async fn http_req_to_struct(req: Request<Body>, my_id: &AppId, target_id: &AppId
     msg.expire = SystemTime::now() + Duration::from_secs(*expire);
     
     Ok(msg)
+}
+
+/// If the autority is empty (e.g. if localhost is used) or the authoroty is not in the routing
+/// table AND the path is /sites, return global routing table
+fn respond_with_sites(targets: &CentralMapping) -> Result<Response<Body>, MyStatusCode> {
+    debug!("Central Site Discovery requested");
+    let body = body::Body::from(serde_json::to_string(targets)?);
+    let response = Response::builder()
+        .status(200)
+        .body(body)
+        .unwrap();
+    Ok(response)
 }
