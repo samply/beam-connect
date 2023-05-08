@@ -64,6 +64,14 @@ struct CliArgs {
     #[clap(long, env, value_parser)]
     tls_ca_certificates_dir: Option<PathBuf>,
 
+    /// Pem file used for ssl support. Will use a snakeoil pem if unset.
+    #[clap(long, env, value_parser, default_value = "/etc/ssl/certs/ssl-cert-snakeoil.pem")]
+    ssl_cert_pem: PathBuf,
+
+    /// Key file used for ssl support. Will use a snakeoil key if unset.
+    #[clap(long, env, value_parser, default_value = "/etc/ssl/private/ssl-cert-snakeoil.key")]
+    ssl_cert_key: PathBuf,
+
     /// Expiry time of the request in seconds
     #[clap(long, env, value_parser, default_value = "3600")]
     expire: u64,
@@ -187,8 +195,8 @@ impl Config {
 
         // TODO: Add this to cli options
         let identity = Identity::from_pkcs8(
-            read_to_string("/etc/ssl/certs/ssl-cert-snakeoil.pem")?.as_bytes(),
-            read_to_string("/etc/ssl/private/ssl-cert-snakeoil.key")?.as_bytes(),
+            read_to_string(args.ssl_cert_pem)?.as_bytes(),
+            read_to_string(args.ssl_cert_key)?.as_bytes(),
         ).expect("Failed to initialize identity for tls acceptor");
         let tls_acceptor = Arc::new(native_tls::TlsAcceptor::new(identity)
             .expect("Failed to initialize tls acceptor")
