@@ -58,7 +58,7 @@ function build() {
         mkdir -p artifacts/binaries-$ARCH
         rsync "$CONNECT" artifacts/binaries-$ARCH/
         BUILD_DOCKER=1
-    elif [ -z "$(docker images -q samply/beam-broker:$TAG)" ] || [ -z "$(docker images -q samply/beam-proxy:$TAG)" ]; then
+    elif [ -z "$(docker images -q samply/beam-connect:$TAG)" ]; then
         echo "Will rebuild docker image since it is missing."
         BUILD_DOCKER=1
     elif [ -x ./target ]; then
@@ -108,4 +108,41 @@ function start {
     docker-compose up --no-build --no-recreate --abort-on-container-exit
 }
 
-start
+function start_ci {
+    unset IMGNAME
+    clean
+    pki/pki devsetup
+    echo "$VAULT_TOKEN" > ./pki/pki.secret
+    build
+    docker-compose up --no-build --no-recreate -d
+    for ADDR in $P1 $P2; do
+        TRIES=1
+        while [ $TRIES -ne 0 ]; do
+            set +e
+            CODE=$(curl -s -o /tmp/body -w '%{response_code}' $ADDR/v1/health)
+            set -e
+            if [ "$CODE" == "200" ]; then
+                TRIES=0
+            else
+                echo "Waiting for $ADDR ... (try ${TRIES}/30, last response was: code=$OUT, body=\"$(cat /tmp/body 2>/dev/null)\")"
+                sleep 1
+                ((TRIES=TRIES+1))
+                if [ $TRIES -ge 30 ]; then
+                    echo "ERROR: $ADDR not available after 30 seconds. Giving up and printing docker compose logs."
+                    docker-compose logs
+                    exit 5
+                fi
+            fi
+        done
+    done
+    echo "Services are up!"
+}
+
+case "$1" in
+  ci)
+    start_ci
+    ;;
+  *)
+    start
+    ;;
+esac

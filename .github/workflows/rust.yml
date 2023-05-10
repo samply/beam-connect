@@ -89,8 +89,27 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Not implemented yet
-        run: echo "This will be implemented soonish"
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install testing dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+      - uses: actions/download-artifact@v3
+        with:
+          name: binaries-amd64
+          path: artifacts/binaries-amd64/
+      - name: Start containers
+        run: ./dev/start ci
+      # - name: Show logs
+      #   working-directory: ./dev
+      #   run: |
+      #     sleep 3
+      #     docker compose logs
+      - name: Run tests
+        run: python ./dev/test.py
 
   docker:
     needs: [ build-rust, pre-check, test ]
