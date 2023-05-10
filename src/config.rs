@@ -1,8 +1,11 @@
-use std::{error::Error, path::PathBuf, fs::{File, read_to_string}, str::FromStr, sync::Arc};
+use std::{error::Error, path::PathBuf, fs::{File, read_to_string}, str::FromStr, sync::Arc, collections::HashSet, time::Duration};
 
 use clap::Parser;
-use hyper::{Uri, http::uri::{Authority, Scheme}};
-use tokio_native_tls::{TlsAcceptor, native_tls::{self, Identity}};
+use hyper::{Uri, http::uri::{Authority, Scheme}, Client, client::HttpConnector};
+use hyper_tls::HttpsConnector;
+use mz_http_proxy::hyper::connector;
+use openssl::x509::X509;
+use tokio_native_tls::{TlsAcceptor, native_tls::{self, Identity}, TlsConnector};
 use tracing::info;
 use serde::{Serialize, Deserialize};
 use shared::{beam_id::{AppId, BeamId, app_to_broker_id, BrokerId}, http_client::{SamplyHttpClient, self}};
@@ -177,6 +180,76 @@ async fn load_public_targets(client: &SamplyHttpClient, url: &PathOrUri) -> Resu
     Ok(deserialized)
 }
 
+pub fn build(
+    ca_certificates: &Vec<X509>,
+    timeout: Option<Duration>,
+    keepalive: Option<Duration>,
+) -> Result<SamplyHttpClient, std::io::Error> {
+    let mut http = HttpConnector::new();
+    http.set_connect_timeout(Some(Duration::from_secs(1)));
+    http.enforce_http(false);
+    http.set_keepalive(keepalive);
+    let tls = native_tls::TlsConnector::builder().danger_accept_invalid_certs(true).danger_accept_invalid_hostnames(true).build().unwrap();
+    let https = HttpsConnector::from((http, tls.into()));
+    let proxy_connector = connector()
+        .map_err(|e| panic!("Unable to build HTTP client: {}", e))
+        .unwrap();
+    let mut proxy_connector = proxy_connector.with_connector(https);
+
+    if !ca_certificates.is_empty() {
+        let mut tls = hyper_tls::native_tls::TlsConnector::builder();
+        tls.danger_accept_invalid_certs(true);
+        tls.danger_accept_invalid_hostnames(true);
+
+        for cert in ca_certificates {
+            const ERR: &str = "Internal Error: Unable to convert Certificate.";
+            let cert = native_tls::Certificate::from_pem(&cert.to_pem().expect(ERR)).expect(ERR);
+            tls.add_root_certificate(cert);
+        }
+        let tls = tls.build().map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!(
+                    "Unable to build TLS Connector with custom CA certificates: {}",
+                    e
+                ),
+            )
+        })?;
+        proxy_connector.set_tls(Some(tls));
+    }
+
+    let proxies = proxy_connector
+        .proxies()
+        .iter()
+        .map(|p| p.uri().to_string())
+        .collect::<HashSet<_>>();
+
+    if proxies.len() == 0 && ca_certificates.len() > 0 {
+        return Err(std::io::Error::new(std::io::ErrorKind::Other, "Certificates for TLS termination were provided but no proxy to use. Please supply correct configuration."));
+    }
+
+    let proxies = match proxies.len() {
+        0 => "no proxy".to_string(),
+        1 => format!("proxy {}", proxies.iter().next().unwrap()),
+        num => format!("{num} proxies {:?}", proxies),
+    };
+    let certs = match ca_certificates.len() {
+        0 => "no trusted certificate".to_string(),
+        1 => "a trusted certificate".to_string(),
+        num => format!("{num} trusted certificates"),
+    };
+    info!("Using {proxies} and {certs} for TLS termination.");
+
+    let mut timeout_connector = hyper_timeout::TimeoutConnector::new(proxy_connector);
+    timeout_connector.set_connect_timeout(timeout);
+    timeout_connector.set_read_timeout(timeout);
+    timeout_connector.set_write_timeout(timeout);
+
+    let client = Client::builder().build(timeout_connector);
+
+    Ok(client)
+}
+
 impl Config {
     pub(crate) async fn load() -> Result<Self,Box<dyn Error>> {
         let args = CliArgs::parse();
@@ -188,7 +261,7 @@ impl Config {
         let expire = args.expire;
 
         let tls_ca_certificates = shared::crypto::load_certificates_from_dir(args.tls_ca_certificates_dir)?;
-        let client = http_client::build(&tls_ca_certificates, None, None)?;
+        let client = build(&tls_ca_certificates, None, None)?;
 
         let targets_public = load_public_targets(&client, &args.discovery_url).await?;
         let targets_local = load_local_targets(&broker_id, &args.local_targets_file)?;
