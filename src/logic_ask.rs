@@ -187,13 +187,12 @@ async fn http_req_to_struct(req: Request<Body>, my_id: &AppId, target_id: &AppId
             warn!("Failed to read body: {e}");
             StatusCode::BAD_REQUEST
     })?;
-    let body = String::from_utf8(body.to_vec())?;
 
     let http_req = HttpRequest {
         method,
         url,
         headers,
-        body,
+        body: body.to_vec(),
     };
     let mut msg = MsgTaskRequest::new(
         my_id.into(),

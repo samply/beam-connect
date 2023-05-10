@@ -26,15 +26,14 @@ async fn send_reply(task: &MsgTaskRequest, config: &Config, client: &SamplyHttpC
         Ok(mut resp) => {
             let body = body::to_bytes(resp.body_mut()).await
                 .map_err(BeamConnectError::FailedToReadTargetsReply)?;
-            let body = String::from_utf8(body.to_vec())?;
             if !resp.status().is_success() {
                 warn!("Httptask returned with status {}. Reporting failiure to broker.", resp.status());
-                warn!("Response body was: {}", &body);
+                // warn!("Response body was: {}", &body);
             };
             (serde_json::to_string(&HttpResponse {
                 status: resp.status(),
                 headers: resp.headers().clone(),
-                body
+                body: body.to_vec()
             })?, WorkStatus::Succeeded)
         },
         Err(e) => {
