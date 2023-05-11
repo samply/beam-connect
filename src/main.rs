@@ -66,6 +66,7 @@ async fn main() -> Result<(), Box<dyn Error>>{
     if let Err(e) = server.await {
         eprintln!("server error: {}", e);
     }
+
     info!("(2/2) Shutting down gracefully ...");
     http_executor.abort();
     http_executor.await.unwrap();
