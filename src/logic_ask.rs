@@ -1,9 +1,10 @@
 use std::{sync::Arc, str::FromStr};
 use std::time::{Duration, SystemTime};
+use hyper::http::HeaderValue;
 use hyper::{Request, Body, Client, client::HttpConnector, Response, header, StatusCode, body, Uri};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
-use log::{info, debug, warn, error};
+use tracing::{info, debug, warn, error};
 use serde_json::Value;
 use shared::http_client::SamplyHttpClient;
 use shared::{beam_id::AppId, MsgTaskResult, MsgTaskRequest};
@@ -27,9 +28,9 @@ pub(crate) async fn handler_http(
 
     headers.insert(header::VIA, format!("Via: Samply.Beam.Connect/0.1 {}", config.my_app_id).parse().unwrap());
 
-    let auth = 
-        headers.remove(header::PROXY_AUTHORIZATION)
-            .ok_or(StatusCode::PROXY_AUTHENTICATION_REQUIRED)?;
+    let auth = headers
+        .remove(header::PROXY_AUTHORIZATION)
+        .unwrap_or(config.proxy_auth.parse().expect("Proxy auth header could not be generated."));
 
     // Re-pack Authorization: Not necessary since we're not looking at the Authorization header.
     // if headers.remove(header::AUTHORIZATION).is_some() {
@@ -74,8 +75,11 @@ pub(crate) async fn handler_http(
         debug!("There was an error in the authority creation: {:?}", target_auth.as_ref().unwrap_err());
         Err(StatusCode::BAD_REQUEST)?;
     }
-    let target = &targets.get(&target_auth.unwrap()) // TODO Unwrap
-        .ok_or(StatusCode::UNAUTHORIZED)?
+    let target = &targets.get(uri.authority().unwrap()) //TODO unwrap
+        .ok_or_else(|| {
+            warn!("Failed to lookup virtualhost in central mapping: {}", uri.authority().unwrap());
+            StatusCode::UNAUTHORIZED
+        })?
         .beamconnect;
 
     info!("{method} {uri} via {target}");
@@ -151,7 +155,7 @@ pub(crate) async fn handler_http(
     let result = task_results.pop().unwrap();
     let response_inner = match result.status {
         shared::WorkStatus::Succeeded => {
-            serde_json::from_str::<HttpResponse>(&result.body.body.ok_or({
+            serde_json::from_str::<HttpResponse>(&result.body.body.ok_or_else(|| {
                 warn!("Recieved one sucessfull result but it has no body");
                 StatusCode::BAD_GATEWAY
             })?)?

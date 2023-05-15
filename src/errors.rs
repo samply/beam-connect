@@ -6,6 +6,8 @@ use thiserror::Error;
 
 #[derive(Error,Debug)]
 pub(crate) enum BeamConnectError {
+    #[error("Regular proxy timout")]
+    ProxyTimeoutError,
     #[error("Proxy rejected our authorization")]
     ProxyRejectedAuthorization,
     #[error("Unable to communicate with Proxy: {0}")]

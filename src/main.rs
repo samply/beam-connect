@@ -4,8 +4,10 @@ use config::Config;
 use hyper::{body, Body, service::{service_fn, make_service_fn}, Request, Response, Server, header::{HeaderName, self, ToStrError}, Uri, http::uri::Authority, server::conn::AddrStream, Client, client::HttpConnector};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
-use log::{info, error, debug, warn};
+use tracing::{info, error, debug, warn};
 use shared::http_client::SamplyHttpClient;
+
+use crate::errors::BeamConnectError;
 
 mod msg;
 mod example_targets;
@@ -18,7 +20,7 @@ mod banner;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>>{
-    pretty_env_logger::init();
+    shared::logger::init_logger()?;
     banner::print_banner();
     let config = Config::load().await?;
     let config2 = config.clone();
@@ -35,7 +37,11 @@ async fn main() -> Result<(), Box<dyn Error>>{
         loop {
             debug!("Waiting for next request ...");
             if let Err(e) = logic_reply::process_requests(config2.clone(), client2.clone()).await {
-                warn!("Error in processing request: {e}. Will continue with the next one.");
+                if let BeamConnectError::ProxyTimeoutError = e {
+                    debug!("{e}");
+                } else {
+                    warn!("Error in processing request: {e}. Will continue with the next one.");
+                }
             }
         }
     });
