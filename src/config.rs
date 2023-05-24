@@ -193,7 +193,6 @@ impl Config {
         let targets_public = load_public_targets(&client, &args.discovery_url).await?;
         let targets_local = load_local_targets(&broker_id, &args.local_targets_file)?;
 
-        // TODO: Add this to cli options
         let identity = Identity::from_pkcs8(
             read_to_string(args.ssl_cert_pem)?.as_bytes(),
             read_to_string(args.ssl_cert_key)?.as_bytes(),
