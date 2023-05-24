@@ -51,11 +51,10 @@ async fn main() -> Result<(), Box<dyn Error>>{
 
     let make_service = make_service_fn(|_conn: &AddrStream| {
         // let remote_addr = conn.remote_addr();
-        let client = client.clone();
         let config = config.clone();
         async {
             Ok::<_, Infallible>(service_fn(move |req|
-                handler_http_wrapper(req, config.clone(), client.clone())))
+                handler_http_wrapper(req, config.clone())))
         }
     });
 
@@ -75,7 +74,6 @@ async fn main() -> Result<(), Box<dyn Error>>{
 pub(crate) async fn handler_http_wrapper(
     req: Request<Body>,
     config: Arc<Config>,
-    client: SamplyHttpClient
 ) -> Result<Response<Body>, Infallible> {
     // On https connections we want to emulate that we successfully connected to get the actual http request
     if req.method() == Method::CONNECT {
