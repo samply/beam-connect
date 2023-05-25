@@ -3,5 +3,10 @@
         "external": "httpbin.org",
         "internal": "httpbin.org",
         "allowed": ["app1.proxy1.broker"]
+    },
+    {
+        "external": "httpbin.org:443",
+        "internal": "httpbin.org:443",
+        "allowed": ["app1.proxy1.broker"]
     }
 ]

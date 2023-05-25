@@ -1,4 +1,4 @@
-use hyper::{Client, client::HttpConnector, Request, header, StatusCode, body, Response, Body, Uri};
+use hyper::{Client, client::HttpConnector, Request, header, StatusCode, body, Response, Body, Uri, Method, http::uri::Scheme};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
 use tracing::{info, warn, debug};
@@ -26,15 +26,14 @@ async fn send_reply(task: &MsgTaskRequest, config: &Config, client: &SamplyHttpC
         Ok(mut resp) => {
             let body = body::to_bytes(resp.body_mut()).await
                 .map_err(BeamConnectError::FailedToReadTargetsReply)?;
-            let body = String::from_utf8(body.to_vec())?;
             if !resp.status().is_success() {
                 warn!("Httptask returned with status {}. Reporting failiure to broker.", resp.status());
-                warn!("Response body was: {}", &body);
+                // warn!("Response body was: {}", &body);
             };
             (serde_json::to_string(&HttpResponse {
                 status: resp.status(),
                 headers: resp.headers().clone(),
-                body
+                body: body.to_vec()
             })?, WorkStatus::Succeeded)
         },
         Err(e) => {
@@ -78,11 +77,17 @@ async fn execute_http_task(task: &MsgTaskRequest, config: &Config, client: &Samp
     if !target.allowed.contains(&AppId::try_from(&task.from).or(Err(BeamConnectError::IdNotAuthorizedToAccessUrl(task.from.clone(), task_req.url.clone())))?) {
         return Err(BeamConnectError::IdNotAuthorizedToAccessUrl(task.from.clone(), task_req.url.clone()));
     }
-    let uri = Uri::builder()
-        .scheme(task_req.url.scheme().unwrap().as_str())
+    if task_req.method == Method::CONNECT {
+        debug!("Connect Request URL: {:?}", task_req.url);
+    }
+    
+    let mut uri = Uri::builder();
+    if let Some(scheme) = task_req.url.scheme_str() {
+        uri = uri.scheme(scheme).path_and_query(task_req.url.path())
+    } 
+    let uri = uri
         .authority(target.replace.to_owned())
-        .path_and_query(task_req.url.path())
-        .build().unwrap(); // TODO
+        .build()?;
 
     info!("Rewriten to: {} {}", task_req.method, uri);
     
