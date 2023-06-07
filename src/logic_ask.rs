@@ -73,6 +73,10 @@ pub(crate) async fn handler_http(
             StatusCode::INTERNAL_SERVER_ERROR
         })?
     };
+    handle_via_tasks(req, &config, target, auth).await
+}
+
+async fn handle_via_tasks(req: Request<Body>, config: &Arc<Config>, target: &AppId, auth: HeaderValue) -> Result<Response<Body>, MyStatusCode> {
     let msg = http_req_to_struct(req, &config.my_app_id, &target, &config.expire).await?;
 
     // Send to Proxy
@@ -83,7 +87,7 @@ pub(crate) async fn handler_http(
         .body(body::Body::from(serde_json::to_vec(&msg)?))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     debug!("SENDING request to Proxy: {:?}, {:?}", msg, req_to_proxy);
-    let resp = client.request(req_to_proxy).await
+    let resp = config.client.request(req_to_proxy).await
         .map_err(|_| StatusCode::BAD_GATEWAY)?;
     if resp.status() != StatusCode::CREATED {
         return Err(StatusCode::BAD_GATEWAY.into());
@@ -107,7 +111,7 @@ pub(crate) async fn handler_http(
         .header(header::ACCEPT, "application/json")
         .uri(results_uri)
         .body(body::Body::empty()).unwrap();
-    let mut resp = client.request(req).await
+    let mut resp = config.client.request(req).await
         .map_err(|e| {
             warn!("Got error from server: {e}");
             StatusCode::BAD_GATEWAY

@@ -18,6 +18,8 @@ mod structs;
 mod logic_ask;
 mod logic_reply;
 mod banner;
+#[cfg(feature = "sockets")]
+mod sockets;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>>{
@@ -46,6 +48,8 @@ async fn main() -> Result<(), Box<dyn Error>>{
             }
         }
     });
+    #[cfg(feature = "sockets")]
+    sockets::spwan_socket_task_poller(config.clone());
 
     let config = Arc::new(config.clone());
 
@@ -67,7 +71,6 @@ async fn main() -> Result<(), Box<dyn Error>>{
     }
     info!("(2/2) Shutting down gracefully ...");
     http_executor.abort();
-    http_executor.await.unwrap();
     Ok(())
 }
 

@@ -22,7 +22,7 @@ shared = { git = "https://github.com/samply/beam", branch="develop" }
 
 #axum = "0.5.12"
 tokio = { version = "1", features = ["macros","rt-multi-thread","signal"] }
-hyper = { version = "0", features = ["full"] }
+hyper = { version = "0.14", features = ["full"] }
 tower-http = { version = "0", features = ["trace"] }
 tower = "*"
 
@@ -42,6 +42,9 @@ clap = {version = "4", features = ["derive"]}
 thiserror = "*"
 http-serde = "1.1.2"
 tokio-native-tls = "0.3.1"
+
+[features]
+sockets = []
 
 [build-dependencies]
 build-data = "0"
