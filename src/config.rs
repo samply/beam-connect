@@ -1,7 +1,8 @@
-use std::{error::Error, path::PathBuf, fs::File, str::FromStr};
+use std::{error::Error, path::PathBuf, fs::{File, read_to_string}, str::FromStr, sync::Arc};
 
 use clap::Parser;
 use hyper::{Uri, http::uri::{Authority, Scheme}};
+use tokio_native_tls::{TlsAcceptor, native_tls::{self, Identity}};
 use tracing::info;
 use serde::{Serialize, Deserialize};
 use shared::{beam_id::{AppId, BeamId, app_to_broker_id, BrokerId}, http_client::{SamplyHttpClient, self}};
@@ -62,6 +63,14 @@ struct CliArgs {
     /// Outgoing HTTP proxy: Directory with CA certificates to trust for TLS connections (e.g. /etc/samply/cacerts/)
     #[clap(long, env, value_parser)]
     tls_ca_certificates_dir: Option<PathBuf>,
+
+    /// Pem file used for ssl support. Will use a snakeoil pem if unset.
+    #[clap(long, env, value_parser, default_value = "/etc/ssl/certs/ssl-cert-snakeoil.pem")]
+    ssl_cert_pem: PathBuf,
+
+    /// Key file used for ssl support. Will use a snakeoil key if unset.
+    #[clap(long, env, value_parser, default_value = "/etc/ssl/private/ssl-cert-snakeoil.key")]
+    ssl_cert_key: PathBuf,
 
     /// Expiry time of the request in seconds
     #[clap(long, env, value_parser, default_value = "3600")]
@@ -129,7 +138,8 @@ pub(crate) struct Config {
     pub(crate) targets_local: LocalMapping,
     pub(crate) targets_public: CentralMapping,
     pub(crate) expire: u64,
-    pub(crate) client: SamplyHttpClient
+    pub(crate) client: SamplyHttpClient,
+    pub(crate) tls_acceptor: Arc<TlsAcceptor>
 }
 
 fn load_local_targets(broker_id: &BrokerId, local_target_path: &Option<PathBuf>) -> Result<LocalMapping,Box<dyn Error>> {
@@ -183,6 +193,15 @@ impl Config {
         let targets_public = load_public_targets(&client, &args.discovery_url).await?;
         let targets_local = load_local_targets(&broker_id, &args.local_targets_file)?;
 
+        let identity = Identity::from_pkcs8(
+            read_to_string(args.ssl_cert_pem)?.as_bytes(),
+            read_to_string(args.ssl_cert_key)?.as_bytes(),
+        ).expect("Failed to initialize identity for tls acceptor");
+        let tls_acceptor = Arc::new(native_tls::TlsAcceptor::new(identity)
+            .expect("Failed to initialize tls acceptor")
+            .into()
+        );
+
         Ok(Config {
             proxy_url: args.proxy_url,
             my_app_id: my_app_id.clone(),
@@ -191,7 +210,8 @@ impl Config {
             targets_local,
             targets_public,
             expire,
-            client
+            client,
+            tls_acceptor
         })
     }
 }

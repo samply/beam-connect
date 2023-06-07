@@ -87,7 +87,14 @@ A mishap in communication will be returned as appropriate HTTP replies.
 
 As described in the [command line parameter list](#run-as-an-application), the central cite discovery is fetched from a given URL or local json file. However, to spare the local services from the need to express outward facing connections themselves, Samply.Beam.Connect exports this received information as a local REST endpoint: `GET http://<beam_connect_url>:<beam_connect_port>/sites`. Note, that the information is only fetched at startup and remains static for the program's lifetime.
 
+#### HTTPS support
+
+Https is supported but requires setting up the following parameters:
+* `SSL_CERT_PEM`: Location to the pem file used for incoming SSL connections.
+* `SSL_CERT_KEY`: Location to the coresponding key file for the SSL connections.
+* `TLS_CA_CERTIFICATES_DIR`: May need to be set if the local target uses a self signed certificate which is not trusted by beam-connect. In this case the certificate of the target must be placed inside `TLS_CA_CERTIFICATES_DIR` as a pem file in order to be trusted.
+
 ## Notes
-At the moment Samply.Beam.Connect does not implement streaming and does not support HTTPS connections. In the intended usage scenario, both Samply.Beam.Connect and Samply.Beam.Proxy are positioned right next to each other in the same privileged network and thus speak plain HTTP. Of course, for outgoing traffic, the Samply.Proxy signs and encrypts the payloads on its own.
+At the moment Samply.Beam.Connect does not implement streaming. In the intended usage scenario, both Samply.Beam.Connect and Samply.Beam.Proxy are positioned right next to each other in the same privileged network and thus speak plain HTTP or [HTTPS if configured](#https). Of course, for outgoing traffic, the Samply.Proxy signs and encrypts the payloads on its own.
 
 In Receiving Mode, Beam.Connect only relays requests to allow-listed resources to mitigate possible misuse.
