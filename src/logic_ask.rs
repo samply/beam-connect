@@ -41,9 +41,8 @@ pub(crate) async fn handler_http(
 
     headers.insert(header::VIA, format!("Via: Samply.Beam.Connect/0.1 {}", config.my_app_id).parse().unwrap());
 
-    let auth = headers
-        .remove(header::PROXY_AUTHORIZATION)
-        .unwrap_or(config.proxy_auth.parse().expect("Proxy auth header could not be generated."));
+    let auth = headers.remove(header::PROXY_AUTHORIZATION)
+            .ok_or(StatusCode::PROXY_AUTHENTICATION_REQUIRED)?;
 
     // Re-pack Authorization: Not necessary since we're not looking at the Authorization header.
     // if headers.remove(header::AUTHORIZATION).is_some() {
