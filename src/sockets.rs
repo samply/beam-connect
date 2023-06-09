@@ -40,12 +40,15 @@ pub(crate) fn spwan_socket_task_poller(config: Config) {
                     warn!("Invalid app id skipping");
                     continue;
                 };
-                match connect_proxy(&task.id, &config).await {
-                    Ok(resp) => tunnel(resp, client, config.clone()),
-                    Err(e) => {
-                        warn!("{e}");
-                    },
-                };
+                let config_clone = config.clone();
+                tokio::spawn(async move {
+                    match connect_proxy(&task.id, &config_clone).await {
+                        Ok(resp) => tunnel(resp, client, &config_clone).await,
+                        Err(e) => {
+                            warn!("{e}");
+                        },
+                    };
+                });
             }
         }
     });
@@ -94,31 +97,29 @@ fn status_to_response(status: StatusCode) -> Response<Body> {
     res
 }
 
-fn tunnel(proxy: Response<Body>, client: AppId, config: Config) {
-    tokio::spawn(async move {
-        let proxy = match upgrade::on(proxy).await {
-            Ok(socket) => socket,
-            Err(e) => {
-                warn!("Failed to upgrade connection to proxy: {e}");
-                return;
-            },
-        };
-        let http_err = Http::new()
-            .http1_only(true)
-            .http1_keep_alive(true)
-            .serve_connection(proxy, service_fn(move |req| {
-                let client2 = client.clone();
-                let config2 = config.clone();
-                async move {
-                    Ok::<_, Infallible>(handle_tunnel(req, &client2, &config2).await.unwrap_or_else(status_to_response))
-                }
-            }))
-            .await;
+async fn tunnel(proxy: Response<Body>, client: AppId, config: &Config) {
+    let proxy = match upgrade::on(proxy).await {
+        Ok(socket) => socket,
+        Err(e) => {
+            warn!("Failed to upgrade connection to proxy: {e}");
+            return;
+        },
+    };
+    let http_err = Http::new()
+        .http1_only(true)
+        .http1_keep_alive(true)
+        .serve_connection(proxy, service_fn(move |req| {
+            let client2 = client.clone();
+            let config2 = config.clone();
+            async move {
+                Ok::<_, Infallible>(handle_tunnel(req, &client2, &config2).await.unwrap_or_else(status_to_response))
+            }
+        }))
+        .await;
 
-        if let Err(e) = http_err {
-            warn!("Error while serving HTTP connection: {e}");
-        }
-    });
+    if let Err(e) = http_err {
+        warn!("Error while serving HTTP connection: {e}");
+    }
 }
 
 async fn handle_tunnel(mut req: Request<Body>, app: &AppId, config: &Config) -> Result<Response<Body>, StatusCode> {
