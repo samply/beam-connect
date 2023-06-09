@@ -48,3 +48,6 @@ sockets = []
 
 [build-dependencies]
 build-data = "0"
+
+[dev-dependencies]
+paste = "1.0.12"
