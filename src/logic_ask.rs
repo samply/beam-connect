@@ -72,11 +72,10 @@ pub(crate) async fn handler_http(
             StatusCode::INTERNAL_SERVER_ERROR
         })?
     };
-    if cfg!(feature = "sockets") {
-        crate::sockets::handle_via_sockets(req, &config, target, auth).await
-    } else {
-        handle_via_tasks(req, &config, target, auth).await
-    }
+    #[cfg(feature = "sockets")]
+    return crate::sockets::handle_via_sockets(req, &config, target, auth).await;
+    #[cfg(not(feature = "sockets"))]
+    return handle_via_tasks(req, &config, target, auth).await;
 }
 
 async fn handle_via_tasks(req: Request<Body>, config: &Arc<Config>, target: &AppId, auth: HeaderValue) -> Result<Response<Body>, MyStatusCode> {
