@@ -50,4 +50,6 @@ sockets = []
 build-data = "0"
 
 [dev-dependencies]
+futures-util = "0.3.28"
 paste = "1.0.12"
+tokio-tungstenite = "0.19.0"
