@@ -11,6 +11,12 @@
             "name": "connect2",
             "virtualhost": "httpbin.org:443",
             "beamconnect": "app2.proxy2.broker"
+        },
+        {
+            "id": "echo",
+            "name": "echo",
+            "virtualhost": "echo",
+            "beamconnect": "app2.proxy2.broker"
         }
     ]
 }

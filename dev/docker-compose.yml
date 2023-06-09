@@ -105,6 +105,10 @@ services:
     secrets:
       - proxy2.pem
       - root.crt.pem
+  echo:
+    image: jmalloc/echo-server
+    environment:
+      PORT: 80
 secrets:
   pki.secret:
     file: ./pki/pki.secret
