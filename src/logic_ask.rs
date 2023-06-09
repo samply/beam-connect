@@ -66,7 +66,6 @@ pub(crate) async fn handler_http(
     *req.uri_mut() = {
         let mut parts = req.uri().to_owned().into_parts();
         parts.authority = Some(authority.clone());
-        parts.scheme = Some(Scheme::HTTPS);
         Uri::from_parts(parts).map_err(|e| {
             warn!("Could not transform uri authority: {e}");
             StatusCode::INTERNAL_SERVER_ERROR
