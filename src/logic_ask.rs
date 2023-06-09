@@ -25,7 +25,6 @@ pub(crate) async fn handler_http(
     authority: Option<Authority>,
 ) -> Result<Response<Body>, MyStatusCode> {
 
-    let client = &config.client;
     let targets = &config.targets_public;
     let method = req.method().to_owned();
     let uri = req.uri().to_owned();
@@ -73,7 +72,11 @@ pub(crate) async fn handler_http(
             StatusCode::INTERNAL_SERVER_ERROR
         })?
     };
-    handle_via_tasks(req, &config, target, auth).await
+    if cfg!(feature = "sockets") {
+        crate::sockets::handle_via_sockets(req, &config, target, auth).await
+    } else {
+        handle_via_tasks(req, &config, target, auth).await
+    }
 }
 
 async fn handle_via_tasks(req: Request<Body>, config: &Arc<Config>, target: &AppId, auth: HeaderValue) -> Result<Response<Body>, MyStatusCode> {

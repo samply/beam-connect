@@ -1,6 +1,6 @@
 use std::{time::Duration, collections::HashSet, io, sync::Arc, convert::Infallible};
 
-use hyper::{header, Request, Body, body::{self, HttpBody}, StatusCode, upgrade::{Upgraded, self}, Response, http::{uri::Authority, HeaderValue}, client::conn::Builder, server::conn::Http, service::service_fn, Uri};
+use hyper::{header, Request, Body, body::{self, HttpBody}, StatusCode, upgrade::{Upgraded, self}, Response, http::{uri::Authority, HeaderValue}, client::conn::Builder, server::conn::Http, service::service_fn, Uri, Method};
 use serde::{Serialize, Deserialize};
 use shared::{MsgId, beam_id::{AppOrProxyId, AppId}};
 use tokio::net::TcpStream;
@@ -44,13 +44,9 @@ pub(crate) fn spwan_socket_task_poller(config: Config) {
                     Ok(resp) => tunnel(resp, client, config.clone()),
                     Err(e) => {
                         warn!("{e}");
-                        continue;
                     },
                 };
-                
             }
-
-
         }
     });
 }
@@ -75,7 +71,7 @@ async fn connect_proxy(task_id: &MsgId, config: &Config) -> Result<Response<Body
     let connect_proxy_req = Request::builder()
         .uri(format!("{}v1/sockets/{task_id}", config.proxy_url))
         .header(header::AUTHORIZATION, config.proxy_auth.clone())
-        .header(header::ACCEPT, "application/json")
+        .header(header::UPGRADE, "tcp")
         .body(Body::empty())
         .expect("This is a valid request");
     let resp = config.client.request(connect_proxy_req).await.map_err(BeamConnectError::ProxyHyperError)?;
@@ -152,11 +148,12 @@ async fn handle_tunnel(mut req: Request<Body>, app: &AppId, config: &Config) -> 
     Ok(resp)
 }
 
-async fn handle_via_sockets(req: Request<Body>, config: &Arc<Config>, target: &AppId, auth: HeaderValue) -> Result<Response<Body>, MyStatusCode> {
+pub(crate) async fn handle_via_sockets(req: Request<Body>, config: &Arc<Config>, target: &AppId, auth: HeaderValue) -> Result<Response<Body>, MyStatusCode> {
     let connect_proxy_req = Request::builder()
+        .method(Method::POST)
         .uri(format!("{}v1/sockets/{target}", config.proxy_url))
         .header(header::AUTHORIZATION, config.proxy_auth.clone())
-        .header(header::ACCEPT, "application/json")
+        .header(header::UPGRADE, "tcp")
         .body(Body::empty())
         .expect("This is a valid request");
     let resp = config.client.request(connect_proxy_req).await.map_err(|e| {
