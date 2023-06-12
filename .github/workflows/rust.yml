@@ -103,6 +103,11 @@ jobs:
         with:
           name: binaries-amd64-${{ matrix.features }}
           path: artifacts/binaries-amd64/
+      - name: Set diffrent image tag
+        run: |
+          if [[ ${{ matrix.features }} == 'sockets' ]]; then
+            echo "TAG=feature-sockets-sockets" >> $GITHUB_ENV
+          fi
       - name: Start containers
         run: ./dev/start ci
       # - name: Show logs
