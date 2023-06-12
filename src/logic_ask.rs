@@ -22,14 +22,13 @@ use crate::{config::Config, structs::MyStatusCode, msg::{HttpRequest, HttpRespon
 pub(crate) async fn handler_http(
     mut req: Request<Body>,
     config: Arc<Config>,
-    authority: Option<Authority>,
+    https_authority: Option<Authority>,
 ) -> Result<Response<Body>, MyStatusCode> {
 
-    let client = &config.client;
     let targets = &config.targets_public;
     let method = req.method().to_owned();
     let uri = req.uri().to_owned();
-    let Some(authority) = authority.as_ref().or(uri.authority()) else {
+    let Some(authority) = https_authority.as_ref().or(uri.authority()) else {
         return if uri.path() == "/sites" {
             // Case 1 for sites request: no authority set and /sites
             respond_with_sites(targets)
@@ -67,12 +66,23 @@ pub(crate) async fn handler_http(
     *req.uri_mut() = {
         let mut parts = req.uri().to_owned().into_parts();
         parts.authority = Some(authority.clone());
-        parts.scheme = Some(Scheme::HTTPS);
+        if https_authority.is_some() {
+            parts.scheme = Some(Scheme::HTTPS);
+        } else {
+            parts.scheme = Some(Scheme::HTTP);
+        }
         Uri::from_parts(parts).map_err(|e| {
             warn!("Could not transform uri authority: {e}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?
     };
+    #[cfg(feature = "sockets")]
+    return crate::sockets::handle_via_sockets(req, &config, target, auth).await;
+    #[cfg(not(feature = "sockets"))]
+    return handle_via_tasks(req, &config, target, auth).await;
+}
+
+async fn handle_via_tasks(req: Request<Body>, config: &Arc<Config>, target: &AppId, auth: HeaderValue) -> Result<Response<Body>, MyStatusCode> {
     let msg = http_req_to_struct(req, &config.my_app_id, &target, &config.expire).await?;
 
     // Send to Proxy
@@ -83,7 +93,7 @@ pub(crate) async fn handler_http(
         .body(body::Body::from(serde_json::to_vec(&msg)?))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     debug!("SENDING request to Proxy: {:?}, {:?}", msg, req_to_proxy);
-    let resp = client.request(req_to_proxy).await
+    let resp = config.client.request(req_to_proxy).await
         .map_err(|_| StatusCode::BAD_GATEWAY)?;
     if resp.status() != StatusCode::CREATED {
         return Err(StatusCode::BAD_GATEWAY.into());
@@ -107,7 +117,7 @@ pub(crate) async fn handler_http(
         .header(header::ACCEPT, "application/json")
         .uri(results_uri)
         .body(body::Body::empty()).unwrap();
-    let mut resp = client.request(req).await
+    let mut resp = config.client.request(req).await
         .map_err(|e| {
             warn!("Got error from server: {e}");
             StatusCode::BAD_GATEWAY
@@ -145,7 +155,7 @@ pub(crate) async fn handler_http(
     let response_inner = match result.status {
         shared::WorkStatus::Succeeded => {
             serde_json::from_str::<HttpResponse>(&result.body.body.ok_or_else(|| {
-                warn!("Recieved one sucessfull result but it has no body");
+                warn!("Received one successful result but it has no body");
                 StatusCode::BAD_GATEWAY
             })?)?
         },
@@ -206,7 +216,7 @@ async fn http_req_to_struct(req: Request<Body>, my_id: &AppId, target_id: &AppId
     Ok(msg)
 }
 
-/// If the autority is empty (e.g. if localhost is used) or the authoroty is not in the routing
+/// If the authority is empty (e.g. if localhost is used) or the authoroty is not in the routing
 /// table AND the path is /sites, return global routing table
 fn respond_with_sites(targets: &CentralMapping) -> Result<Response<Body>, MyStatusCode> {
     debug!("Central Site Discovery requested");

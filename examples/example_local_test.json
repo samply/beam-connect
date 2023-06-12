@@ -1,12 +1,17 @@
 [
     {
-        "external": "httpbin.org",
-        "internal": "httpbin.org",
+        "external": "postman-echo.com",
+        "internal": "postman-echo.com",
         "allowed": ["app1.proxy1.broker"]
     },
     {
-        "external": "httpbin.org:443",
-        "internal": "httpbin.org:443",
+        "external": "postman-echo.com:443",
+        "internal": "postman-echo.com:443",
+        "allowed": ["app1.proxy1.broker"]
+    },
+    {
+        "external": "echo",
+        "internal": "echo:80",
         "allowed": ["app1.proxy1.broker"]
     }
 ]

@@ -91,7 +91,7 @@ As described in the [command line parameter list](#run-as-an-application), the c
 
 Https is supported but requires setting up the following parameters:
 * `SSL_CERT_PEM`: Location to the pem file used for incoming SSL connections.
-* `SSL_CERT_KEY`: Location to the coresponding key file for the SSL connections.
+* `SSL_CERT_KEY`: Location to the corresponding key file for the SSL connections.
 * `TLS_CA_CERTIFICATES_DIR`: May need to be set if the local target uses a self signed certificate which is not trusted by beam-connect. In this case the certificate of the target must be placed inside `TLS_CA_CERTIFICATES_DIR` as a pem file in order to be trusted.
 
 ## Notes
