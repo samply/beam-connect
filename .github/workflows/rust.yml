@@ -90,13 +90,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-      - name: Install testing dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests
       - uses: actions/download-artifact@v3
         with:
           name: binaries-amd64
@@ -109,7 +102,7 @@ jobs:
       #     sleep 3
       #     docker compose logs
       - name: Run tests
-        run: python ./dev/test.py
+        run: cargo test
 
   docker:
     needs: [ build-rust, pre-check, test ]
