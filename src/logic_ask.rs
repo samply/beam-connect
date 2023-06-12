@@ -22,13 +22,13 @@ use crate::{config::Config, structs::MyStatusCode, msg::{HttpRequest, HttpRespon
 pub(crate) async fn handler_http(
     mut req: Request<Body>,
     config: Arc<Config>,
-    authority: Option<Authority>,
+    https_authority: Option<Authority>,
 ) -> Result<Response<Body>, MyStatusCode> {
 
     let targets = &config.targets_public;
     let method = req.method().to_owned();
     let uri = req.uri().to_owned();
-    let Some(authority) = authority.as_ref().or(uri.authority()) else {
+    let Some(authority) = https_authority.as_ref().or(uri.authority()) else {
         return if uri.path() == "/sites" {
             // Case 1 for sites request: no authority set and /sites
             respond_with_sites(targets)
@@ -66,6 +66,11 @@ pub(crate) async fn handler_http(
     *req.uri_mut() = {
         let mut parts = req.uri().to_owned().into_parts();
         parts.authority = Some(authority.clone());
+        if https_authority.is_some() {
+            parts.scheme = Some(Scheme::HTTPS);
+        } else {
+            parts.scheme = Some(Scheme::HTTP);
+        }
         Uri::from_parts(parts).map_err(|e| {
             warn!("Could not transform uri authority: {e}");
             StatusCode::INTERNAL_SERVER_ERROR
