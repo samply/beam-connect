@@ -3,13 +3,13 @@
         {
             "id": "C2",
             "name": "connect2",
-            "virtualhost": "httpbin.org",
+            "virtualhost": "postman-echo.com",
             "beamconnect": "app2.proxy2.broker"
         },
         {
             "id": "C2",
             "name": "connect2",
-            "virtualhost": "httpbin.org:443",
+            "virtualhost": "postman-echo.com:443",
             "beamconnect": "app2.proxy2.broker"
         },
         {

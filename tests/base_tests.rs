@@ -5,7 +5,7 @@ mod common;
 use common::*;
 
 pub async fn test_normal(scheme: &str) {
-    let req = Request::get(format!("{scheme}://httpbin.org")).body(Body::empty()).unwrap();
+    let req = Request::get(format!("{scheme}://postman-echo.com/get")).body(Body::empty()).unwrap();
     let res = request(req).await;
     assert_eq!(res.status(), StatusCode::OK, "Could not make normal request via beam-connect");
 }
@@ -16,7 +16,7 @@ pub async fn test_json(scheme: &str) {
         "bar": "foo",
         "foobar": false,
     });
-    let req = Request::get(format!("{scheme}://httpbin.org")).body(Body::from(serde_json::to_vec(&json).unwrap())).unwrap();
+    let req = Request::post(format!("{scheme}://postman-echo.com/post")).body(Body::from(serde_json::to_vec(&json).unwrap())).unwrap();
     let mut res = request(req).await;
     assert_eq!(res.status(), StatusCode::OK, "Could not make json request via beam-connect");
     let bytes = hyper::body::to_bytes(res.body_mut()).await.unwrap();
@@ -47,9 +47,10 @@ mod socket_tests {
         assert_eq!(resp.status(), StatusCode::SWITCHING_PROTOCOLS);
         let socket = hyper::upgrade::on(resp).await.unwrap();
         let mut stream = WebSocketStream::from_raw_socket(socket, Role::Client, None).await;
-        // _ = stream.next().await.unwrap().unwrap();
+        let _server_hello = stream.next().await.unwrap().unwrap();
         stream.send(Message::Text("Hello World".to_string())).await.unwrap();
         let res = stream.next().await.unwrap().unwrap();
-        assert_eq!(res, Message::Text("Hello World".to_string()))
+        assert_eq!(res, Message::Text("Hello World".to_string()));
+        stream.close(None).await.unwrap();
     }
 }
