@@ -16,7 +16,7 @@ struct SocketTask {
     ttl: String,
 }
 
-pub(crate) fn spwan_socket_task_poller(config: Config) {
+pub(crate) fn spawn_socket_task_poller(config: Config) {
     tokio::spawn(async move {
         use BeamConnectError::*;
         let mut seen: HashSet<MsgId> = HashSet::new();
@@ -135,7 +135,7 @@ async fn execute_http_task(mut req: Request<Body>, app: &AppId, config: &Config)
         return Err(StatusCode::BAD_REQUEST);
     };
     if !target.allowed.contains(&app) {
-        warn!("App {app} not autherized to access url {}", req.uri());
+        warn!("App {app} not authorized to access url {}", req.uri());
         return Err(StatusCode::UNAUTHORIZED);
     };
     *req.uri_mut() = {

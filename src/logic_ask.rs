@@ -155,7 +155,7 @@ async fn handle_via_tasks(req: Request<Body>, config: &Arc<Config>, target: &App
     let response_inner = match result.status {
         shared::WorkStatus::Succeeded => {
             serde_json::from_str::<HttpResponse>(&result.body.body.ok_or_else(|| {
-                warn!("Recieved one sucessfull result but it has no body");
+                warn!("Received one successful result but it has no body");
                 StatusCode::BAD_GATEWAY
             })?)?
         },
@@ -216,7 +216,7 @@ async fn http_req_to_struct(req: Request<Body>, my_id: &AppId, target_id: &AppId
     Ok(msg)
 }
 
-/// If the autority is empty (e.g. if localhost is used) or the authoroty is not in the routing
+/// If the authority is empty (e.g. if localhost is used) or the authoroty is not in the routing
 /// table AND the path is /sites, return global routing table
 fn respond_with_sites(targets: &CentralMapping) -> Result<Response<Body>, MyStatusCode> {
     debug!("Central Site Discovery requested");

@@ -27,7 +27,7 @@ async fn send_reply(task: &MsgTaskRequest, config: &Config, client: &SamplyHttpC
             let body = body::to_bytes(resp.body_mut()).await
                 .map_err(BeamConnectError::FailedToReadTargetsReply)?;
             if !resp.status().is_success() {
-                warn!("Httptask returned with status {}. Reporting failiure to broker.", resp.status());
+                warn!("Httptask returned with status {}. Reporting failure to broker.", resp.status());
                 // warn!("Response body was: {}", &body);
             };
             (serde_json::to_string(&HttpResponse {
@@ -89,7 +89,7 @@ async fn execute_http_task(task: &MsgTaskRequest, config: &Config, client: &Samp
         .authority(target.replace.to_owned())
         .build()?;
 
-    info!("Rewriten to: {} {}", task_req.method, uri);
+    info!("Rewritten to: {} {}", task_req.method, uri);
     
     let mut req = Request::builder()
         .method(task_req.method)

@@ -163,7 +163,7 @@ async fn load_public_targets(client: &SamplyHttpClient, url: &PathOrUri) -> Resu
                     .try_into()
                     .map_err(|e| BeamConnectError::ConfigurationError(format!("Invalid url for public sites: {e}")))?
                 ).await
-                .map_err(|e| BeamConnectError::ConfigurationError(format!("Cannot retreive central service discovery configuration: {e}"))
+                .map_err(|e| BeamConnectError::ConfigurationError(format!("Cannot retrieve central service discovery configuration: {e}"))
             )?;
 
             let body = response.body_mut();

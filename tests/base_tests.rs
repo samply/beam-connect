@@ -20,8 +20,8 @@ pub async fn test_json(scheme: &str) {
     let mut res = request(req).await;
     assert_eq!(res.status(), StatusCode::OK, "Could not make json request via beam-connect");
     let bytes = hyper::body::to_bytes(res.body_mut()).await.unwrap();
-    let recieved: Value = serde_json::from_slice(&bytes).unwrap();
-    assert_eq!(recieved.get("json").unwrap(), &json, "Json did not match");
+    let received: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(received.get("json").unwrap(), &json, "Json did not match");
 }
 
 

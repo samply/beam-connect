@@ -49,7 +49,7 @@ async fn main() -> Result<(), Box<dyn Error>>{
         }
     });
     #[cfg(feature = "sockets")]
-    sockets::spwan_socket_task_poller(config.clone());
+    sockets::spawn_socket_task_poller(config.clone());
 
     let config = Arc::new(config.clone());
 
