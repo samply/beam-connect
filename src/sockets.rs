@@ -117,7 +117,7 @@ async fn tunnel(proxy: Response<Body>, client: AppId, config: &Config) {
             let client2 = client.clone();
             let config2 = config.clone();
             async move {
-                Ok::<_, Infallible>(handle_tunnel(req, &client2, &config2).await.unwrap_or_else(status_to_response))
+                Ok::<_, Infallible>(execute_http_task(req, &client2, &config2).await.unwrap_or_else(status_to_response))
             }
         }))
         .with_upgrades()
@@ -128,9 +128,8 @@ async fn tunnel(proxy: Response<Body>, client: AppId, config: &Config) {
     }
 }
 
-async fn handle_tunnel(mut req: Request<Body>, app: &AppId, config: &Config) -> Result<Response<Body>, StatusCode> {
-    // TODO: What exactly happens here if we dont have an authority
-    let authority = req.uri().authority().unwrap();
+async fn execute_http_task(mut req: Request<Body>, app: &AppId, config: &Config) -> Result<Response<Body>, StatusCode> {
+    let authority = req.uri().authority().expect("Authority is always set by the requesting beam-connect");
     let Some(target) = config.targets_local.get(authority) else {
         warn!("Failed to lookup authority {authority}");
         return Err(StatusCode::BAD_REQUEST);
