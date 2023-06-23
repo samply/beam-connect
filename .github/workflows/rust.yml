@@ -106,7 +106,7 @@ jobs:
       - name: Set diffrent image tag
         run: |
           if [[ ${{ format('"{0}"', matrix.features) }} == 'sockets' ]]; then
-            echo "TAG=feature-sockets-sockets" >> $GITHUB_ENV
+            echo "TAG=develop-sockets" >> $GITHUB_ENV
           fi
       - name: Start containers
         run: ./dev/start ci
