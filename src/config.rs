@@ -221,7 +221,7 @@ mod tests {
     use super::CentralMapping;
     use super::LocalMapping;
     use crate::example_targets::example_local;
-    use shared::beam_id::{BrokerId,BeamId,app_to_broker_id};
+    use beam-lib::{BrokerId,BeamId,app_to_broker_id};
 
     #[test]
     fn serde_authority() {

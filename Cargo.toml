@@ -18,7 +18,7 @@ inherits = "release"
 strip = false
 
 [dependencies]
-shared = { git = "https://github.com/samply/beam", branch="develop" }
+beam-lib = { git = "https://github.com/samply/beam", branch="develop" }
 
 #axum = "0.5.12"
 tokio = { version = "1", features = ["macros","rt-multi-thread","signal"] }

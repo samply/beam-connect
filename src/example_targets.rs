@@ -1,5 +1,5 @@
 use hyper::http::uri::Authority;
-use shared::beam_id::{AppId, BeamId, BrokerId, ProxyId};
+use beam-lib::{AppId, BeamId, BrokerId, ProxyId};
 
 use crate::config::{CentralMapping, LocalMapping, LocalMappingEntry};
 
