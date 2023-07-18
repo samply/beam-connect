@@ -13,8 +13,8 @@ pub(crate) fn example_local(broker_id: &str) -> LocalMapping {
         ("wttr.in", "wttr.in", vec![app1_id.clone(), app2_id.clone()]),
         ("node23.uk12.network", "host23.internal.network", vec![app1_id, app2_id])
     ].map(|(needle,replace,allowed)| LocalMappingEntry {
-        needle: Authority::from_static(needle),
-        replace: Authority::from_static(replace),
+        needle: Authority::from_static(needle).into(),
+        replace: Authority::from_static(replace).into(),
         allowed
     })
     .into_iter()

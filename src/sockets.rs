@@ -1,6 +1,6 @@
 use std::{time::Duration, collections::HashSet, sync::Arc, convert::Infallible};
 
-use hyper::{header, Request, Body, body, StatusCode, upgrade::{self, OnUpgrade}, Response, http::{HeaderValue}, client::conn::Builder, server::conn::Http, service::service_fn, Uri, Method};
+use hyper::{header, Request, Body, body, StatusCode, upgrade::{self, OnUpgrade}, Response, http::{HeaderValue, uri::PathAndQuery}, client::conn::Builder, server::conn::Http, service::service_fn, Uri, Method};
 use tokio::io::AsyncWriteExt;
 use tracing::{error, warn, debug, info};
 use beam_lib::{SocketTask, MsgId, AppId, AppOrProxyId};
@@ -132,7 +132,13 @@ async fn execute_http_task(mut req: Request<Body>, app: &AppId, config: &Config)
     };
     *req.uri_mut() = {
         let mut parts = req.uri().to_owned().into_parts();
-        parts.authority = Some(authority.clone());
+        parts.authority = Some(target.replace.authority.clone());
+        if let Some(path) = target.replace.path {
+            parts.path_and_query = Some(PathAndQuery::try_from(&format!("/{path}{}", parts.path_and_query.as_ref().map(PathAndQuery::as_str).unwrap_or(""))).map_err(|e| {
+                warn!("Failed to set redirect path: {e}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?);
+        }
         Uri::from_parts(parts).map_err(|e| {
             warn!("Could not transform uri authority: {e}");
             StatusCode::INTERNAL_SERVER_ERROR

@@ -123,9 +123,39 @@ impl LocalMapping {
 pub(crate) struct LocalMappingEntry {
     #[serde(with = "http_serde::authority", rename="external")]
     pub(crate) needle: Authority, // Host part of URL
-    #[serde(with = "http_serde::authority", rename="internal")]
-    pub(crate) replace: Authority,
+    #[serde(rename="internal")]
+    pub(crate) replace: AuthorityReplacement,
     pub(crate) allowed: Vec<AppId>
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AuthorityReplacement {
+    pub authority: Authority,
+    pub path: Option<String>
+}
+
+impl From<Authority> for AuthorityReplacement {
+    fn from(authority: Authority) -> Self {
+        Self { authority, path: None }
+    }
+}
+
+impl<'de> Deserialize<'de> for AuthorityReplacement {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where D: serde::Deserializer<'de>
+    {
+        let string = String::deserialize(deserializer)?;
+        match string.split_once('/') {
+            Some((auth, path)) => Ok(Self {
+                authority: auth.parse().map_err(serde::de::Error::custom)?,
+                path: Some(path.to_owned()),
+            }),
+            None => Ok(Self {
+                authority: string.parse().map_err(serde::de::Error::custom)?,
+                path: None,
+            })
+        }
+    }
 }
 
 #[derive(Clone)]
