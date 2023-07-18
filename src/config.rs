@@ -305,7 +305,7 @@ mod tests {
         let broker_id = "broker.ccp-it.dktk.dkfz.de"; 
         set_broker_id(broker_id.to_owned());
         let serialized = r#"[
-            {"external": "ifconfig.me","internal":"ifconfig.me","allowed":["connect1.proxy23.broker.ccp-it.dktk.dkfz.de","connect2.proxy23.broker.ccp-it.dktk.dkfz.de"]},
+            {"external": "ifconfig.me","internal":"ifconfig.me/asdf","allowed":["connect1.proxy23.broker.ccp-it.dktk.dkfz.de","connect2.proxy23.broker.ccp-it.dktk.dkfz.de"]},
             {"external": "ip-api.com","internal":"ip-api.com","allowed":["connect1.proxy23.broker.ccp-it.dktk.dkfz.de","connect2.proxy23.broker.ccp-it.dktk.dkfz.de"]},
             {"external": "wttr.in","internal":"wttr.in","allowed":["connect1.proxy23.broker.ccp-it.dktk.dkfz.de","connect2.proxy23.broker.ccp-it.dktk.dkfz.de"]},
             {"external": "node23.uk12.network","internal":"host23.internal.network","allowed":["connect1.proxy23.broker.ccp-it.dktk.dkfz.de","connect2.proxy23.broker.ccp-it.dktk.dkfz.de"]}
