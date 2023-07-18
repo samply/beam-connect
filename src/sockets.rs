@@ -1,20 +1,12 @@
 use std::{time::Duration, collections::HashSet, sync::Arc, convert::Infallible};
 
 use hyper::{header, Request, Body, body, StatusCode, upgrade::{self, OnUpgrade}, Response, http::{HeaderValue}, client::conn::Builder, server::conn::Http, service::service_fn, Uri, Method};
-use serde::{Serialize, Deserialize};
-use shared::{MsgId, beam_id::{AppOrProxyId, AppId}};
 use tokio::io::AsyncWriteExt;
 use tracing::{error, warn, debug, info};
+use beam_lib::{SocketTask, MsgId, AppId, AppOrProxyId};
 
 use crate::{config::Config, errors::BeamConnectError, structs::MyStatusCode};
 
-#[derive(Debug, Serialize, Deserialize)]
-struct SocketTask {
-    from: AppOrProxyId,
-    to: Vec<AppOrProxyId>,
-    id: MsgId,
-    ttl: String,
-}
 
 pub(crate) fn spawn_socket_task_poller(config: Config) {
     tokio::spawn(async move {
@@ -41,7 +33,7 @@ pub(crate) fn spawn_socket_task_poller(config: Config) {
                     continue;
                 }
                 seen.insert(task.id.clone());
-                let Ok(client) = AppId::try_from(&task.from) else {
+                let AppOrProxyId::App(client) = task.from else {
                     warn!("Invalid app id skipping");
                     continue;
                 };

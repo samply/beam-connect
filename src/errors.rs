@@ -1,7 +1,7 @@
-use std::{str::Utf8Error, string::FromUtf8Error};
+use std::string::FromUtf8Error;
 
 use hyper::Uri;
-use beam-lib::AppOrProxyId;
+use beam_lib::AppOrProxyId;
 use thiserror::Error;
 
 #[derive(Error,Debug)]

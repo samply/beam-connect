@@ -11,7 +11,7 @@ use hyper_tls::HttpsConnector;
 use tracing::{info, debug, warn, error};
 use serde_json::Value;
 use shared::http_client::SamplyHttpClient;
-use shared::{beam_id::AppId, MsgTaskResult, MsgTaskRequest};
+use beam_lib::{AppId, TaskResult, TaskRequest, WorkStatus, FailureStrategy, MsgId};
 
 use crate::config::CentralMapping;
 use crate::{config::Config, structs::MyStatusCode, msg::{HttpRequest, HttpResponse}, errors::BeamConnectError};
@@ -83,7 +83,7 @@ pub(crate) async fn handler_http(
 }
 
 async fn handle_via_tasks(req: Request<Body>, config: &Arc<Config>, target: &AppId, auth: HeaderValue) -> Result<Response<Body>, MyStatusCode> {
-    let msg = http_req_to_struct(req, &config.my_app_id, &target, &config.expire).await?;
+    let msg = http_req_to_struct(req, &config.my_app_id, &target, config.expire).await?;
 
     // Send to Proxy
     let req_to_proxy = Request::builder()
@@ -140,7 +140,7 @@ async fn handle_via_tasks(req: Request<Body>, config: &Arc<Config>, target: &App
 
     let bytes = body::to_bytes(resp.body_mut()).await
         .map_err(|_| StatusCode::BAD_GATEWAY)?;
-    let mut task_results = serde_json::from_slice::<Vec<MsgTaskResult>>(&bytes)
+    let mut task_results = serde_json::from_slice::<Vec<TaskResult<HttpResponse>>>(&bytes)
         .map_err(|e| {
             warn!("Unable to parse HTTP result: {}", e);
             StatusCode::BAD_GATEWAY
@@ -153,14 +153,11 @@ async fn handle_via_tasks(req: Request<Body>, config: &Arc<Config>, target: &App
     }
     let result = task_results.pop().unwrap();
     let response_inner = match result.status {
-        shared::WorkStatus::Succeeded => {
-            serde_json::from_str::<HttpResponse>(&result.body.body.ok_or_else(|| {
-                warn!("Received one successful result but it has no body");
-                StatusCode::BAD_GATEWAY
-            })?)?
+        WorkStatus::Succeeded => {
+            result.body
         },
         e => {
-            warn!("Reply had unexpected workresult code: {}", e);
+            warn!("Reply had unexpected workresult code: {e:?}");
             return Err(StatusCode::BAD_GATEWAY)?;
         }
     };
@@ -187,7 +184,7 @@ async fn handle_via_tasks(req: Request<Body>, config: &Arc<Config>, target: &App
     Ok(resp)
 }
 
-async fn http_req_to_struct(req: Request<Body>, my_id: &AppId, target_id: &AppId, expire: &u64) -> Result<MsgTaskRequest, MyStatusCode> {
+async fn http_req_to_struct(req: Request<Body>, my_id: &AppId, target_id: &AppId, expire: u64) -> Result<TaskRequest<HttpRequest>, MyStatusCode> {
     let method = req.method().clone();
     let url = req.uri().clone();
     let headers = req.headers().clone();
@@ -203,15 +200,15 @@ async fn http_req_to_struct(req: Request<Body>, my_id: &AppId, target_id: &AppId
         headers,
         body: body.to_vec(),
     };
-    let mut msg = MsgTaskRequest::new(
-        my_id.into(),
-        vec![target_id.into()],
-        serde_json::to_string(&http_req)?,
-        shared::FailureStrategy::Discard,
-        Value::Null
-    );
-
-    msg.expire = SystemTime::now() + Duration::from_secs(*expire);
+    let msg = TaskRequest {
+        from: my_id.clone().into(),
+        to: vec![target_id.clone().into()],
+        body: http_req,
+        failure_strategy: FailureStrategy::Discard,
+        metadata: Value::Null,
+        ttl: format!("{expire}s"),
+        id: MsgId::new()
+    };
     
     Ok(msg)
 }

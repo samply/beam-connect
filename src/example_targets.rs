@@ -1,9 +1,9 @@
 use hyper::http::uri::Authority;
-use beam-lib::{AppId, BeamId, BrokerId, ProxyId};
+use beam_lib::{AppId, ProxyId};
 
-use crate::config::{CentralMapping, LocalMapping, LocalMappingEntry};
+use crate::config::{LocalMapping, LocalMappingEntry};
 
-pub(crate) fn example_local(broker_id: &BrokerId) -> LocalMapping {
+pub(crate) fn example_local(broker_id: &str) -> LocalMapping {
     let proxy23 = ProxyId::new(&format!("proxy23.{}", broker_id)).unwrap();
     let app1_id = AppId::new(&format!("connect1.{}",proxy23)).unwrap();
     let app2_id = AppId::new(&format!("connect2.{}",proxy23)).unwrap();
