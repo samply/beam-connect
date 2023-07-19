@@ -1,5 +1,5 @@
 use beam_lib::{TaskRequest, TaskResult, WorkStatus, AppId, AppOrProxyId};
-use hyper::{Client, client::HttpConnector, Request, header, StatusCode, body, Response, Body, Uri, Method, http::uri::Scheme};
+use hyper::{Client, client::HttpConnector, Request, header, StatusCode, body, Response, Body, Uri, Method, http::uri::{Scheme, PathAndQuery}};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
 use tracing::{info, warn, debug};
@@ -93,9 +93,9 @@ async fn execute_http_task(task: &TaskRequest<HttpRequest>, config: &Config, cli
     if let Some(scheme) = task_req.url.scheme_str() {
         uri = uri.scheme(scheme);
         uri = if let Some(path) = target.replace.path {
-            uri.path_and_query(&format!("/{path}{}", task_req.url.path()))
+            uri.path_and_query(&format!("/{path}{}", task_req.url.path_and_query().unwrap_or(&PathAndQuery::from_static(""))))
         } else {
-            uri.path_and_query(task_req.url.path())
+            uri.path_and_query(task_req.url.path_and_query().unwrap_or(&PathAndQuery::from_static("")).as_str())
         };
     } 
     let uri = uri
