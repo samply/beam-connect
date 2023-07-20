@@ -1,13 +1,19 @@
 use hyper::{Body, Request, StatusCode};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 mod common;
 use common::*;
 
 pub async fn test_normal(scheme: &str) {
-    let req = Request::get(format!("{scheme}://postman-echo.com/get")).body(Body::empty()).unwrap();
-    let res = request(req).await;
+    let req = Request::get(format!("{scheme}://postman-get?foo1=bar1&foo2=bar2")).body(Body::empty()).unwrap();
+    let mut res = request(req).await;
     assert_eq!(res.status(), StatusCode::OK, "Could not make normal request via beam-connect");
+    let bytes = hyper::body::to_bytes(res.body_mut()).await.unwrap();
+    let received: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(received.get("args").unwrap(), &json!({
+        "foo1": "bar1",
+        "foo2": "bar2"
+    }), "Json did not match");
 }
 
 pub async fn test_json(scheme: &str) {
@@ -16,7 +22,7 @@ pub async fn test_json(scheme: &str) {
         "bar": "foo",
         "foobar": false,
     });
-    let req = Request::post(format!("{scheme}://postman-echo.com/post")).body(Body::from(serde_json::to_vec(&json).unwrap())).unwrap();
+    let req = Request::post(format!("{scheme}://postman-post")).body(Body::from(serde_json::to_vec(&json).unwrap())).unwrap();
     let mut res = request(req).await;
     assert_eq!(res.status(), StatusCode::OK, "Could not make json request via beam-connect");
     let bytes = hyper::body::to_bytes(res.body_mut()).await.unwrap();

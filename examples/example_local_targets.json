@@ -1,5 +1,5 @@
 [
   {"external": "uk1.virtual","internal":"ifconfig.me","allowed":["connect.uk1.broker.example","connect.uk2.broker.example"]},
   {"external": "uk2.virtual","internal":"ip-api.com","allowed":["connect.uk2.broker.example","connect.uk1.broker.example"]},
-  {"external": "node23.uk12.network","internal":"host23.internal.network","allowed":["connect.uk2.broker.example","connect.uk12.broker.example"]}
+  {"external": "node23.uk12.network","internal":"host23.internal.network/node23","allowed":["connect.uk2.broker.example","connect.uk12.broker.example"]}
 ]
