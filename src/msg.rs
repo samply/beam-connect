@@ -15,7 +15,7 @@ pub(crate) struct HttpRequest {
     pub(crate) body: Vec<u8>
 }
 
-#[derive(Serialize,Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct HttpResponse {
     #[serde(with = "hyper_serde")]
     pub(crate) status: StatusCode,
