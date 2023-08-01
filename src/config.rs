@@ -1,11 +1,11 @@
-use std::{error::Error, path::PathBuf, fs::{File, read_to_string}, str::FromStr, sync::Arc};
+use std::{error::Error, path::PathBuf, fs::read_to_string, str::FromStr, sync::Arc};
 
 use clap::Parser;
-use hyper::{Uri, http::uri::{Authority, Scheme}};
+use hyper::{Uri, http::uri::Authority};
+use shared::http_client::{SamplyHttpClient, self};
 use tokio_native_tls::{TlsAcceptor, native_tls::{self, Identity}};
-use tracing::info;
 use serde::{Serialize, Deserialize};
-use shared::{beam_id::{AppId, BeamId, app_to_broker_id, BrokerId}, http_client::{SamplyHttpClient, self}};
+use beam_lib::{AppId, set_broker_id};
 
 use crate::{example_targets, errors::BeamConnectError};
 
@@ -40,7 +40,7 @@ struct CliArgs {
     #[clap(long, env, value_parser)]
     proxy_url: Uri,
 
-    /// Your short App ID (e.g. connect1)
+    /// Your App ID (e.g. connect1.proxy1.broker)
     #[clap(long, env, value_parser)]
     app_id: String,
 
@@ -103,7 +103,7 @@ pub(crate) struct Site {
     pub(crate) beamconnect: AppId,
 }
 
-#[derive(Clone,Deserialize,Debug)]
+#[derive(Clone, Deserialize, Debug)]
 pub(crate) struct LocalMapping {
     pub(crate) entries: Vec<LocalMappingEntry>
 }
@@ -119,13 +119,43 @@ impl LocalMapping {
 }
 
 /// Maps an external authority to some internal authority if the requesting App is allowed to
-#[derive(Clone,Deserialize,Debug)]
+#[derive(Clone, Deserialize, Debug)]
 pub(crate) struct LocalMappingEntry {
     #[serde(with = "http_serde::authority", rename="external")]
     pub(crate) needle: Authority, // Host part of URL
-    #[serde(with = "http_serde::authority", rename="internal")]
-    pub(crate) replace: Authority,
+    #[serde(rename="internal")]
+    pub(crate) replace: AuthorityReplacement,
     pub(crate) allowed: Vec<AppId>
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AuthorityReplacement {
+    pub authority: Authority,
+    pub path: Option<String>
+}
+
+impl From<Authority> for AuthorityReplacement {
+    fn from(authority: Authority) -> Self {
+        Self { authority, path: None }
+    }
+}
+
+impl<'de> Deserialize<'de> for AuthorityReplacement {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where D: serde::Deserializer<'de>
+    {
+        let string = String::deserialize(deserializer)?;
+        match string.split_once('/') {
+            Some((auth, path)) => Ok(Self {
+                authority: auth.parse().map_err(serde::de::Error::custom)?,
+                path: Some(path.to_owned()),
+            }),
+            None => Ok(Self {
+                authority: string.parse().map_err(serde::de::Error::custom)?,
+                path: None,
+            })
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -142,7 +172,7 @@ pub(crate) struct Config {
     pub(crate) tls_acceptor: Arc<TlsAcceptor>
 }
 
-fn load_local_targets(broker_id: &BrokerId, local_target_path: &Option<PathBuf>) -> Result<LocalMapping,Box<dyn Error>> {
+fn load_local_targets(broker_id: &str, local_target_path: &Option<PathBuf>) -> Result<LocalMapping,Box<dyn Error>> {
     if let Some(json_file) = local_target_path {
         if json_file.exists() {
             let json_string = std::fs::read_to_string(json_file)?;
@@ -163,7 +193,7 @@ async fn load_public_targets(client: &SamplyHttpClient, url: &PathOrUri) -> Resu
                     .try_into()
                     .map_err(|e| BeamConnectError::ConfigurationError(format!("Invalid url for public sites: {e}")))?
                 ).await
-                .map_err(|e| BeamConnectError::ConfigurationError(format!("Cannot retreive central service discovery configuration: {e}"))
+                .map_err(|e| BeamConnectError::ConfigurationError(format!("Cannot retrieve central service discovery configuration: {e}"))
             )?;
 
             let body = response.body_mut();
@@ -178,13 +208,15 @@ async fn load_public_targets(client: &SamplyHttpClient, url: &PathOrUri) -> Resu
 }
 
 impl Config {
-    pub(crate) async fn load() -> Result<Self,Box<dyn Error>> {
+    pub(crate) async fn load() -> Result<Self, Box<dyn Error>> {
         let args = CliArgs::parse();
-        let broker_id = app_to_broker_id(&args.app_id)?;
-        AppId::set_broker_id(broker_id.clone());
-        let my_app_id = AppId::new(&args.app_id)?;
-        let broker_id = BrokerId::new(&broker_id)?;
-
+        let broker_id = args.app_id
+            .splitn(3, '.')
+            .last()
+            .ok_or_else(|| BeamConnectError::ConfigurationError(format!("Invalid beam id: {}", args.app_id)))?;
+        set_broker_id(broker_id.to_owned());
+        let app_id = AppId::new(&args.app_id)?;
+    
         let expire = args.expire;
 
         let tls_ca_certificates = shared::crypto::load_certificates_from_dir(args.tls_ca_certificates_dir)?;
@@ -204,8 +236,8 @@ impl Config {
 
         Ok(Config {
             proxy_url: args.proxy_url,
-            my_app_id: my_app_id.clone(),
-            proxy_auth: format!("ApiKey {} {}", my_app_id, args.proxy_apikey),
+            my_app_id: app_id.clone(),
+            proxy_auth: format!("ApiKey {} {}", app_id, args.proxy_apikey),
             bind_addr: args.bind_addr,
             targets_local,
             targets_public,
@@ -218,10 +250,11 @@ impl Config {
 
 #[cfg(test)]
 mod tests {
+    use beam_lib::set_broker_id;
+
     use super::CentralMapping;
     use super::LocalMapping;
     use crate::example_targets::example_local;
-    use shared::beam_id::{BrokerId,BeamId,app_to_broker_id};
 
     #[test]
     fn serde_authority() {
@@ -253,6 +286,7 @@ mod tests {
               }
             ]
           }"#;
+        set_broker_id("broker.ccp-it.dktk.dkfz.de".to_owned());
         let obj: CentralMapping = serde_json::from_str(serialized).unwrap();
         assert_eq!(obj.sites.len(), 4);
         let mut routes = obj.sites.iter();
@@ -268,14 +302,13 @@ mod tests {
 
     #[test]
     fn local_target_configuration() {
-        let broker_id = app_to_broker_id("foo.bar.broker.example").unwrap();
-        BrokerId::set_broker_id(broker_id.clone());
-        let broker_id = BrokerId::new(&broker_id).unwrap();
+        let broker_id = "broker.ccp-it.dktk.dkfz.de"; 
+        set_broker_id(broker_id.to_owned());
         let serialized = r#"[
-            {"external": "ifconfig.me","internal":"ifconfig.me","allowed":["connect1.proxy23.broker.example","connect2.proxy23.broker.example"]},
-            {"external": "ip-api.com","internal":"ip-api.com","allowed":["connect1.proxy23.broker.example","connect2.proxy23.broker.example"]},
-            {"external": "wttr.in","internal":"wttr.in","allowed":["connect1.proxy23.broker.example","connect2.proxy23.broker.example"]},
-            {"external": "node23.uk12.network","internal":"host23.internal.network","allowed":["connect1.proxy23.broker.example","connect2.proxy23.broker.example"]}
+            {"external": "ifconfig.me","internal":"ifconfig.me/asdf","allowed":["connect1.proxy23.broker.ccp-it.dktk.dkfz.de","connect2.proxy23.broker.ccp-it.dktk.dkfz.de"]},
+            {"external": "ip-api.com","internal":"ip-api.com","allowed":["connect1.proxy23.broker.ccp-it.dktk.dkfz.de","connect2.proxy23.broker.ccp-it.dktk.dkfz.de"]},
+            {"external": "wttr.in","internal":"wttr.in","allowed":["connect1.proxy23.broker.ccp-it.dktk.dkfz.de","connect2.proxy23.broker.ccp-it.dktk.dkfz.de"]},
+            {"external": "node23.uk12.network","internal":"host23.internal.network","allowed":["connect1.proxy23.broker.ccp-it.dktk.dkfz.de","connect2.proxy23.broker.ccp-it.dktk.dkfz.de"]}
         ]"#;
         let obj: LocalMapping = LocalMapping{entries:serde_json::from_str(serialized).unwrap()};
         let expect = example_local(&broker_id);

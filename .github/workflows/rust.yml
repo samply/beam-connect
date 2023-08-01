@@ -29,6 +29,9 @@ jobs:
         arch:
           - amd64
           - arm64
+        features:
+          - sockets
+          - ""
 
     steps:
       - name: Set arch ${{ matrix.arch }}
@@ -69,17 +72,17 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.arch }}-${{ env.PROFILE }}
-          prefix-key: "v1-rust" # Increase to invalidate old caches.
+          prefix-key: v1-rust-${{ matrix.features && format('features_{0}', matrix.features) || 'nofeatures' }} # Increase to invalidate old caches.
       - name: Build (${{ matrix.arch }})
         uses: actions-rs/cargo@v1
         with:
           use-cross: ${{ env.is_cross }}
           command: build
-          args: --target ${{ env.rustarch }} ${{ env.profilestr }}
+          args: --target ${{ env.rustarch }} ${{ matrix.features && format('--features {0}', matrix.features) }} ${{ env.profilestr }}
       - name: Upload Artifact
         uses: actions/upload-artifact@v3
         with:
-          name: binaries-${{ matrix.arch }}
+          name: binaries-${{ matrix.arch }}-${{ matrix.features }}
           path: |
             target/${{ env.rustarch }}/${{ env.PROFILE }}/connect
 
@@ -88,18 +91,49 @@ jobs:
     needs: [ build-rust ]
     runs-on: ubuntu-22.04
 
+    strategy:
+      matrix:
+        features:
+          - ""
+          - "sockets"
+
     steps:
-      - name: Not implemented yet
-        run: echo "This will be implemented soonish"
+      - uses: actions/checkout@v3
+      - uses: actions/download-artifact@v3
+        with:
+          name: binaries-amd64-${{ matrix.features }}
+          path: artifacts/binaries-amd64/
+      - name: Set diffrent image tag
+        run: |
+          if [[ ${{ format('"{0}"', matrix.features) }} == 'sockets' ]]; then
+            echo "TAG=develop-sockets" >> $GITHUB_ENV
+          fi
+      - name: Start containers
+        run: ./dev/start ci
+      # - name: Show logs
+      #   working-directory: ./dev
+      #   run: |
+      #     sleep 3
+      #     docker compose logs
+      - name: Run tests
+        run: cargo test ${{ format('--features "{0}"', matrix.features) }}
 
   docker:
     needs: [ build-rust, pre-check, test ]
+
+    strategy:
+      matrix:
+        features:
+          - ""
+          - "sockets"
+
     # This workflow defines how a maven package is built, tested and published.
     # Visit: https://github.com/samply/github-workflows/blob/develop/.github/workflows/docker-ci.yml, for more information
     uses: samply/github-workflows/.github/workflows/docker-ci.yml@main
     with:
       # The Docker Hub Repository you want eventually push to, e.g samply/share-client
       image-name: "samply/beam-connect"
+      image-tag-suffix: ${{ matrix.features && format('-{0}', matrix.features) }}
       # Define special prefixes for docker tags. They will prefix each images tag.
       # image-tag-prefix: "foo"
       # Define the build context of your image, typically default '.' will be enough
@@ -108,9 +142,8 @@ jobs:
       build-file: './Dockerfile.ci'
       # NOTE: This doesn't work currently
       # A list of build arguments, passed to the docker build
-#      build-args: |
-#        PROFILE=${{ env.PROFILE }}
-#        COMPONENT=broker
+      build-args: |
+        FEATURE=-${{ matrix.features }}
       # Define the target platforms of the docker build (default "linux/amd64,linux/arm64/v8")
       # build-platforms: "linux/amd64,linux/arm64"
       # If your actions generate an artifact in a previous build step, you can tell this workflow to download it

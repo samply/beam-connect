@@ -1,12 +1,12 @@
-use std::{str::Utf8Error, string::FromUtf8Error};
+use std::string::FromUtf8Error;
 
 use hyper::Uri;
-use shared::beam_id::AppOrProxyId;
+use beam_lib::AppOrProxyId;
 use thiserror::Error;
 
 #[derive(Error,Debug)]
 pub(crate) enum BeamConnectError {
-    #[error("Regular proxy timout")]
+    #[error("Regular proxy timeout")]
     ProxyTimeoutError,
     #[error("Proxy rejected our authorization")]
     ProxyRejectedAuthorization,
