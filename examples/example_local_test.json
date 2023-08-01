@@ -1,7 +1,27 @@
 [
     {
-        "external": "httpbin.org",
-        "internal": "httpbin.org",
+        "external": "postman-get",
+        "internal": "postman-echo.com/get",
+        "allowed": ["app1.proxy1.broker"]
+    },
+    {
+        "external": "postman-post",
+        "internal": "postman-echo.com/post",
+        "allowed": ["app1.proxy1.broker"]
+    },
+    {
+        "external": "postman-get:443",
+        "internal": "postman-echo.com:443/get",
+        "allowed": ["app1.proxy1.broker"]
+    },
+    {
+        "external": "postman-post:443",
+        "internal": "postman-echo.com:443/post",
+        "allowed": ["app1.proxy1.broker"]
+    },
+    {
+        "external": "echo",
+        "internal": "echo:80",
         "allowed": ["app1.proxy1.broker"]
     }
 ]

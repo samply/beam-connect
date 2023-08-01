@@ -18,11 +18,12 @@ inherits = "release"
 strip = false
 
 [dependencies]
+beam-lib = { git = "https://github.com/samply/beam", branch="develop", features = ["strict-ids"] }
 shared = { git = "https://github.com/samply/beam", branch="develop" }
 
 #axum = "0.5.12"
 tokio = { version = "1", features = ["macros","rt-multi-thread","signal"] }
-hyper = { version = "0", features = ["full"] }
+hyper = { version = "0.14", features = ["full"] }
 tower-http = { version = "0", features = ["trace"] }
 tower = "*"
 
@@ -37,11 +38,20 @@ serde = "*"
 serde_json = "*"
 hyper_serde = "0.13"
 
-clap = {version = "4", features = ["derive"]}
+clap = { version = "4", features = ["derive", "env"] }
 
 thiserror = "*"
 http-serde = "1.1.2"
 http = "0.2.8"
+tokio-native-tls = "0.3.1"
+
+[features]
+sockets = []
 
 [build-dependencies]
 build-data = "0"
+
+[dev-dependencies]
+futures-util = "0.3.28"
+paste = "1.0.12"
+tokio-tungstenite = "0.19.0"
