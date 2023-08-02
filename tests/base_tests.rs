@@ -30,9 +30,20 @@ pub async fn test_json(scheme: &str) {
     assert_eq!(received.get("json").unwrap(), &json, "Json did not match");
 }
 
+pub async fn test_sites(scheme: &str) {
+    let json: Value = serde_json::json!({"sites":[ {"beamconnect": "app2.proxy2.broker", "id": "C2", "name": "connect2", "virtualhost": "postman-get"},  {"beamconnect": "app2.proxy2.broker", "id": "C2", "name": "connect2", "virtualhost": "postman-get:443"}, {"beamconnect": "app2.proxy2.broker", "id": "C2", "name": "connect2", "virtualhost": "postman-post"}, {"beamconnect": "app2.proxy2.broker", "id": "C2", "name": "connect2", "virtualhost": "postman-post:443"}, {"beamconnect": "app2.proxy2.broker", "id": "echo", "name": "echo", "virtualhost": "echo"}]});
+    let req = Request::builder().method("GET").uri(format!("{scheme}://127.0.0.1/sites")).body(Body::from("")).unwrap();
+    let mut res = request(req).await;
+    assert_eq!(res.status(), StatusCode::OK, "Could not make sites request via beam-connect");
+    let bytes = hyper::body::to_bytes(res.body_mut()).await.unwrap();
+    let received: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(&received, &json, "Json did not match");
+}
+
 
 test_http_and_https!{test_normal}
 test_http_and_https!{test_json}
+test_http_and_https!{test_sites}
 
 #[cfg(feature = "sockets")]
 #[cfg(test)]
