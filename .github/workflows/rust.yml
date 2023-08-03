@@ -120,6 +120,7 @@ jobs:
 
   docker:
     needs: [ build-rust, pre-check, test ]
+    if: github.ref_protected == true
 
     strategy:
       matrix:
