@@ -25,9 +25,9 @@
             "beamconnect": "app2.proxy2.broker"
         },
         {
-            "id": "echo",
-            "name": "echo",
-            "virtualhost": "echo",
+            "id": "ws-echo",
+            "name": "ws-echo",
+            "virtualhost": "ws-echo",
             "beamconnect": "app2.proxy2.broker"
         }
     ]
