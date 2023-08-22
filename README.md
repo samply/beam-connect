@@ -42,6 +42,9 @@ The following command line parameter is only used in Receiver mode (see [Usage S
 The following command line parameter is optional, as it uses a default value:
  * `BIND_ADDR`: The interface and port Beam.Connect is listening on. Defaults to `0.0.0.0:8062`.
 
+If the following flag is optional.
+ * `NO_AUTH`:  Samply.Beam.Connect does not require a `Proxy Authorization` header, i.e. it forwards requests without (client) authentication
+
 All parameters can be given as environment variables instead.
 
 ### Run using Docker
@@ -58,9 +61,10 @@ docker run -e PROXY_URL='<PROXY_URL>' \
            -e DISCOVERY_URL='<DISCOVERY_URL>' \
            -e PROXY_APIKEY='<PROXY_APIKEY>' \
            -e BIND_ADDR='<BIND_ADDR>' \
+           -e NO_AUTH='true' \
            samply/beam-connect
 ```
-Again, the last environment variable `PROXY_APIKEY` is only required for usage in Receiver Mode and `BIND_ADDR` is optional.
+Again, the environment variable `PROXY_APIKEY` is only required for usage in Receiver Mode. `BIND_ADDR` and `NO_AUTH` are optional.
 
 ### Use Beam.Connect to forward a HTTP request
 We give an example [cURL](https://curl.se/) request showing the usage of Beam.Connect to access an internal service within University Hospital #23 (`uk23`):
