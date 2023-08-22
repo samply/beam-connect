@@ -75,6 +75,11 @@ struct CliArgs {
     /// Expiry time of the request in seconds
     #[clap(long, env, value_parser, default_value = "3600")]
     expire: u64,
+
+    /// If set will enable any local apps to authenticate without the `Proxy-Authorization` header.
+    /// Security note: This allows any app with network access to beam-connect to send requests to any other beam-connect service in the beam network.
+    #[clap(long, env, action)]
+    no_auth: bool,
 }
 
 #[derive(Serialize, Deserialize,Clone,Debug)]
@@ -169,7 +174,8 @@ pub(crate) struct Config {
     pub(crate) targets_public: CentralMapping,
     pub(crate) expire: u64,
     pub(crate) client: SamplyHttpClient,
-    pub(crate) tls_acceptor: Arc<TlsAcceptor>
+    pub(crate) tls_acceptor: Arc<TlsAcceptor>,
+    pub(crate) no_auth: bool,
 }
 
 fn load_local_targets(broker_id: &str, local_target_path: &Option<PathBuf>) -> Result<LocalMapping,Box<dyn Error>> {
@@ -239,6 +245,7 @@ impl Config {
             my_app_id: app_id.clone(),
             proxy_auth: format!("ApiKey {} {}", app_id, args.proxy_apikey),
             bind_addr: args.bind_addr,
+            no_auth: args.no_auth,
             targets_local,
             targets_public,
             expire,
