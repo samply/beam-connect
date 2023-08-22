@@ -19,9 +19,7 @@ strip = false
 
 [dependencies]
 beam-lib = { git = "https://github.com/samply/beam", branch="develop", features = ["strict-ids"] }
-shared = { git = "https://github.com/samply/beam", branch="develop" }
 
-#axum = "0.5.12"
 tokio = { version = "1", features = ["macros","rt-multi-thread","signal"] }
 hyper = { version = "0.14", features = ["full"] }
 tower-http = { version = "0", features = ["trace"] }
@@ -43,6 +41,10 @@ clap = { version = "4", features = ["derive", "env"] }
 thiserror = "*"
 http-serde = "1.1.2"
 tokio-native-tls = "0.3.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+reqwest = { version = "0.11.19", features = ["json"] }
+anyhow = "1"
+openssl = "*" # Already used by native_tls which does not reexport it. This is used for b64 en/decode
 
 [features]
 sockets = []

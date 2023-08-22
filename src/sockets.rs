@@ -1,9 +1,10 @@
 use std::{time::Duration, collections::HashSet, sync::Arc, convert::Infallible};
 
-use hyper::{header, Request, Body, body, StatusCode, upgrade::{self, OnUpgrade}, Response, http::{HeaderValue, uri::PathAndQuery}, client::conn::Builder, server::conn::Http, service::service_fn, Uri, Method};
-use tokio::io::AsyncWriteExt;
+use hyper::{header, Request, Body, StatusCode, upgrade::OnUpgrade, http::{HeaderValue, uri::PathAndQuery}, client::conn::Builder, server::conn::Http, service::service_fn, Uri};
+use tokio::{io::AsyncWriteExt, net::TcpStream};
 use tracing::{error, warn, debug, info};
 use beam_lib::{SocketTask, MsgId, AppId, AppOrProxyId};
+use reqwest::Response;
 
 use crate::{config::Config, errors::BeamConnectError, structs::MyStatusCode};
 
@@ -52,29 +53,29 @@ pub(crate) fn spawn_socket_task_poller(config: Config) {
 }
 
 async fn poll_socket_task(config: &Config) -> Result<Vec<SocketTask>, BeamConnectError> {
-    let poll_socket_tasks = Request::builder()
-        .uri(format!("{}v1/sockets", config.proxy_url))
+    let resp = config.client
+        .get(format!("{}v1/sockets", config.proxy_url))
         .header(header::AUTHORIZATION, config.proxy_auth.clone())
         .header(header::ACCEPT, "application/json")
-        .body(Body::empty())?;
-    let mut resp = config.client.request(poll_socket_tasks).await.map_err(BeamConnectError::ProxyHyperError)?;
+        .send()
+        .await
+        .map_err(BeamConnectError::ProxyReqwestError)?;
     match resp.status() {
         StatusCode::OK => {},
         StatusCode::GATEWAY_TIMEOUT => return Err(BeamConnectError::ProxyTimeoutError),
         e => return Err(BeamConnectError::ProxyOtherError(format!("Unexpected status code {e}")))
     };
-    let body = body::to_bytes(resp.body_mut()).await.map_err(BeamConnectError::ProxyHyperError)?;
-    Ok(serde_json::from_slice(&body)?)
+    resp.json().await.map_err(BeamConnectError::ProxyReqwestError)
 }
 
-async fn connect_proxy(task_id: &MsgId, config: &Config) -> Result<Response<Body>, BeamConnectError> {
-    let connect_proxy_req = Request::builder()
-        .uri(format!("{}v1/sockets/{task_id}", config.proxy_url))
+async fn connect_proxy(task_id: &MsgId, config: &Config) -> Result<Response, BeamConnectError> {
+    let resp = config.client
+        .get(format!("{}v1/sockets/{task_id}", config.proxy_url))
         .header(header::AUTHORIZATION, config.proxy_auth.clone())
         .header(header::UPGRADE, "tcp")
-        .body(Body::empty())
-        .expect("This is a valid request");
-    let resp = config.client.request(connect_proxy_req).await.map_err(BeamConnectError::ProxyHyperError)?;
+        .send()
+        .await
+        .map_err(BeamConnectError::ProxyReqwestError)?;
     let invalid_status_reason = match resp.status() {
         StatusCode::SWITCHING_PROTOCOLS => return Ok(resp),
         StatusCode::NOT_FOUND | StatusCode::GONE => {
@@ -88,14 +89,14 @@ async fn connect_proxy(task_id: &MsgId, config: &Config) -> Result<Response<Body
     Err(BeamConnectError::ProxyOtherError(invalid_status_reason))
 }
 
-fn status_to_response(status: StatusCode) -> Response<Body> {
-    let mut res = Response::default();
+fn status_to_response(status: StatusCode) -> hyper::Response<Body> {
+    let mut res = hyper::Response::default();
     *res.status_mut() = status;
     res
 }
 
-async fn tunnel(proxy: Response<Body>, client: AppId, config: &Config) {
-    let proxy = match upgrade::on(proxy).await {
+async fn tunnel(proxy: Response, client: AppId, config: &Config) {
+    let proxy = match proxy.upgrade().await {
         Ok(socket) => socket,
         Err(e) => {
             warn!("Failed to upgrade connection to proxy: {e}");
@@ -120,7 +121,7 @@ async fn tunnel(proxy: Response<Body>, client: AppId, config: &Config) {
     }
 }
 
-async fn execute_http_task(mut req: Request<Body>, app: &AppId, config: &Config) -> Result<Response<Body>, StatusCode> {
+async fn execute_http_task(mut req: Request<Body>, app: &AppId, config: &Config) -> Result<hyper::Response<Body>, StatusCode> {
     let authority = req.uri().authority().expect("Authority is always set by the requesting beam-connect");
     let Some(target) = config.targets_local.get(authority) else {
         warn!("Failed to lookup authority {authority}");
@@ -150,10 +151,34 @@ async fn execute_http_task(mut req: Request<Body>, app: &AppId, config: &Config)
     } else {
         None
     };
-    let mut resp = config.client.request(req).await.map_err(|e| {
-        warn!("Communication with target failed: {e}");
+
+    // See https://github.com/hyperium/hyper/blob/master/examples/client.rs#L42
+    let host = req.uri().host().expect("uri has no host");
+    let port = req.uri().port_u16().unwrap_or(80);
+    let addr = format!("{}:{}", host, port);
+    let client_socket = TcpStream::connect(&addr).await.map_err(|e| {
+        warn!("Connection to {addr} failed: {e}");
         StatusCode::BAD_GATEWAY
     })?;
+    let (mut sender, proxy_conn) = Builder::new()
+        .http1_preserve_header_case(true)
+        .http1_title_case_headers(true)
+        .handshake(client_socket)
+        .await
+        .map_err(|e| {
+            warn!("Error executuing http task. Failed handshake with server({addr}): {e}");
+            StatusCode::BAD_GATEWAY
+        })?;
+    tokio::task::spawn(async move {
+        if let Err(err) = proxy_conn.await {
+            println!("Connection failed: {:?}", err);
+        }
+    });
+    let mut resp = sender.send_request(req).await.map_err(|e| {
+        warn!("Error sending request to destination server({addr}): {e}");
+        StatusCode::BAD_GATEWAY
+    })?;
+
     if req_upgrade.is_some() {
         tunnel_upgrade(resp.extensions_mut().remove::<OnUpgrade>(), req_upgrade);
     }
@@ -178,22 +203,22 @@ fn tunnel_upgrade(client: Option<OnUpgrade>, server: Option<OnUpgrade>) {
     }
 }
 
-pub(crate) async fn handle_via_sockets(mut req: Request<Body>, config: &Arc<Config>, target: &AppId, auth: HeaderValue) -> Result<Response<Body>, MyStatusCode> {
-    let connect_proxy_req = Request::builder()
-        .method(Method::POST)
-        .uri(format!("{}v1/sockets/{target}", config.proxy_url))
+pub(crate) async fn handle_via_sockets(mut req: Request<Body>, config: &Arc<Config>, target: &AppId, auth: HeaderValue) -> Result<hyper::Response<Body>, MyStatusCode> {
+    let resp = config.client
+        .post(format!("{}v1/sockets/{target}", config.proxy_url))
         .header(header::AUTHORIZATION, auth)
         .header(header::UPGRADE, "tcp")
-        .body(Body::empty())
-        .expect("This is a valid request");
-    let resp = config.client.request(connect_proxy_req).await.map_err(|e| {
-        warn!("Failed to reach proxy: {e}");
-        StatusCode::BAD_GATEWAY
-    })?;
+        .send()
+        .await
+        .map_err(|e| {
+            warn!("Failed to reach proxy: {e}");
+            StatusCode::BAD_GATEWAY
+        }
+    )?;
     if resp.status() != StatusCode::SWITCHING_PROTOCOLS {
         return Err(resp.status().into());
     }
-    let proxy_socket = upgrade::on(resp).await.map_err(|e| {
+    let proxy_socket = resp.upgrade().await.map_err(|e| {
         warn!("Failed to upgrade response from proxy to socket: {e}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;

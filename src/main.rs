@@ -1,15 +1,14 @@
-use std::{net::SocketAddr, str::FromStr, convert::Infallible, string::FromUtf8Error, error::Error, fmt::Display, collections::{hash_map, HashMap}, sync::Arc};
+use std::{net::SocketAddr, str::FromStr, convert::Infallible, error::Error, sync::Arc, time::Duration};
 
 use config::Config;
-use hyper::{body, Body, service::{service_fn, make_service_fn}, Request, Response, Server, header::{HeaderName, self, ToStrError}, Uri, http::uri::Authority, server::conn::{AddrStream, Http}, Client, client::HttpConnector, Method};
-use hyper_proxy::ProxyConnector;
-use hyper_tls::HttpsConnector;
+use hyper::{body, Body, service::{service_fn, make_service_fn}, Request, Response, Server, server::conn::{AddrStream, Http}, Method};
 use logic_ask::handler_http;
-use tracing::{info, error, debug, warn};
-use shared::http_client::SamplyHttpClient;
+use tracing::{info, debug, warn};
+use tracing_subscriber::{EnvFilter, filter::LevelFilter};
 
 use crate::errors::BeamConnectError;
 
+mod shutdown;
 mod msg;
 mod example_targets;
 mod config;
@@ -23,7 +22,7 @@ mod sockets;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>>{
-    shared::logger::init_logger()?;
+    tracing::subscriber::set_global_default(tracing_subscriber::fmt().with_env_filter(EnvFilter::builder().with_default_directive(LevelFilter::INFO.into()).from_env_lossy()).finish())?;
     banner::print_banner();
     let config = Config::load().await?;
     let config2 = config.clone();
@@ -40,10 +39,17 @@ async fn main() -> Result<(), Box<dyn Error>>{
         loop {
             debug!("Waiting for next request ...");
             if let Err(e) = logic_reply::process_requests(config2.clone(), client2.clone()).await {
-                if let BeamConnectError::ProxyTimeoutError = e {
-                    debug!("{e}");
-                } else {
-                    warn!("Error in processing request: {e}. Will continue with the next one.");
+                match e {
+                    BeamConnectError::ProxyTimeoutError => {
+                        debug!("{e}");
+                    },
+                    BeamConnectError::ProxyReqwestError(e) => {
+                        warn!("Error reaching beam proxy: {e}");
+                        tokio::time::sleep(Duration::from_secs(10)).await;
+                    }
+                    _ => {
+                        warn!("Error in processing request: {e}. Will continue with the next one.");
+                    }
                 }
             }
         }
@@ -64,7 +70,7 @@ async fn main() -> Result<(), Box<dyn Error>>{
 
     let server = Server::bind(&listen)
         .serve(make_service)
-        .with_graceful_shutdown(shared::graceful_shutdown::wait_for_signal());
+        .with_graceful_shutdown(crate::shutdown::wait_for_signal());
 
     if let Err(e) = server.await {
         eprintln!("server error: {}", e);

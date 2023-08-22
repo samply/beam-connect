@@ -1,8 +1,6 @@
 use std::{string::FromUtf8Error, error::Error, fmt::Display};
 
-use hyper::{StatusCode, header::ToStrError, http::uri::Authority};
-use tracing::error;
-use shared::errors::SamplyBeamError;
+use hyper::{StatusCode, header::ToStrError};
 
 #[derive(Debug)]
 pub(crate) struct MyStatusCode {
@@ -24,19 +22,6 @@ impl From<ToStrError> for MyStatusCode {
 impl From<MyStatusCode> for StatusCode {
     fn from(e: MyStatusCode) -> Self {
         e.code
-    }
-}
-
-impl From<SamplyBeamError> for MyStatusCode {
-    fn from(e: SamplyBeamError) -> Self {
-        let code = match e {
-            SamplyBeamError::InvalidBeamId(e) => {
-                error!("{e}");
-                StatusCode::BAD_REQUEST
-            },
-            _ => StatusCode::NOT_IMPLEMENTED,
-        };
-        Self { code }
     }
 }
 

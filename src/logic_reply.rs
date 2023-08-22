@@ -1,14 +1,12 @@
-use beam_lib::{TaskRequest, TaskResult, WorkStatus, AppId, AppOrProxyId};
-use hyper::{Client, client::HttpConnector, Request, header, StatusCode, body, Response, Body, Uri, Method, http::uri::{Scheme, PathAndQuery}};
-use hyper_proxy::ProxyConnector;
-use hyper_tls::HttpsConnector;
+use beam_lib::{TaskRequest, TaskResult, WorkStatus, AppOrProxyId};
+use hyper::{header, StatusCode, body, Uri, Method, http::uri::PathAndQuery};
 use tracing::{info, warn, debug};
 use serde_json::Value;
-use shared::http_client::SamplyHttpClient;
+use reqwest::{Client, Response};
 
 use crate::{config::Config, errors::BeamConnectError, msg::{HttpResponse, HttpRequest}};
 
-pub(crate) async fn process_requests(config: Config, client: SamplyHttpClient) -> Result<(), BeamConnectError> {
+pub(crate) async fn process_requests(config: Config, client: Client) -> Result<(), BeamConnectError> {
     // Fetch tasks from Proxy
     let msgs = fetch_requests(&config, &client).await?;
 
@@ -22,18 +20,20 @@ pub(crate) async fn process_requests(config: Config, client: SamplyHttpClient) -
     Ok(())
 }
 
-async fn send_reply(task: &TaskRequest<HttpRequest>, config: &Config, client: &SamplyHttpClient, resp: Result<Response<Body>, BeamConnectError>) -> Result<(), BeamConnectError> {
+async fn send_reply(task: &TaskRequest<HttpRequest>, config: &Config, client: &Client, resp: Result<Response, BeamConnectError>) -> Result<(), BeamConnectError> {
     let (reply_body, status) = match resp {
-        Ok(mut resp) => {
-            let body = body::to_bytes(resp.body_mut()).await
-                .map_err(BeamConnectError::FailedToReadTargetsReply)?;
-            if !resp.status().is_success() {
+        Ok(resp) => {
+            let status = resp.status();
+            let headers = resp.headers().clone();
+            if !status.is_success() {
                 warn!("Httptask returned with status {}. Reporting failure to broker.", resp.status());
                 // warn!("Response body was: {}", &body);
             };
+            let body = resp.bytes().await
+                .map_err(BeamConnectError::FailedToReadTargetsReply)?;
             (HttpResponse {
-                status: resp.status(),
-                headers: resp.headers().clone(),
+                status,
+                headers,
                 body: body.to_vec()
             }, WorkStatus::Succeeded)
         },
@@ -54,15 +54,15 @@ async fn send_reply(task: &TaskRequest<HttpRequest>, config: &Config, client: &S
         metadata: Value::Null,
         body: reply_body,
     };
-    let req_to_proxy = Request::builder()
-        .method("PUT")
-        .uri(format!("{}v1/tasks/{}/results/{}", config.proxy_url, task.id, config.my_app_id.clone()))
+    debug!("Delivering response to Proxy: {msg:?}");
+    let resp = client
+        .put(format!("{}v1/tasks/{}/results/{}", config.proxy_url, task.id, config.my_app_id.clone()))
         .header(header::AUTHORIZATION, config.proxy_auth.clone())
-        .body(body::Body::from(serde_json::to_vec(&msg)?))
-        .map_err( BeamConnectError::HyperBuildError)?;
-    debug!("Delivering response to Proxy: {:?}, {:?}", msg, req_to_proxy);
-    let resp = client.request(req_to_proxy).await
-        .map_err(BeamConnectError::ProxyHyperError)?;
+        .json(&msg)
+        .send()
+        .await
+        .map_err(BeamConnectError::ProxyReqwestError)?;
+
     if resp.status() != StatusCode::CREATED {
         return Err(BeamConnectError::ProxyOtherError(format!("Got error code {} trying to submit our result.", resp.status())));
     }
@@ -70,7 +70,7 @@ async fn send_reply(task: &TaskRequest<HttpRequest>, config: &Config, client: &S
 }
 
 // TODO: Take ownership of `task` to save clones
-async fn execute_http_task(task: &TaskRequest<HttpRequest>, config: &Config, client: &SamplyHttpClient) -> Result<Response<Body>, BeamConnectError> {
+async fn execute_http_task(task: &TaskRequest<HttpRequest>, config: &Config, client: &Client) -> Result<Response, BeamConnectError> {
     let task_req = &task.body;
     info!("{} | {} {}", task.from, task_req.method, task_req.url);
     let target = config
@@ -103,28 +103,25 @@ async fn execute_http_task(task: &TaskRequest<HttpRequest>, config: &Config, cli
         .build()?;
 
     info!("Rewritten to: {} {}", task_req.method, uri);
-    
-    let mut req = Request::builder()
-        .method(task_req.method.clone())
-        .uri(uri);
-    *req.headers_mut().unwrap() = task_req.headers.clone();
-    let body = body::Body::from(task_req.body.clone());
-    let req = req.body(body)?;
-    debug!("Issuing request: {:?}", req);
-    let resp = client.request(req).await
+    let resp = client
+        .request(task_req.method.clone(), task_req.url.to_string())
+        .headers(task_req.headers.clone())
+        .body(body::Body::from(task_req.body.clone()))
+        .send()
+        .await
         .map_err(|e| BeamConnectError::CommunicationWithTargetFailed(e.to_string()))?;
     Ok(resp)
 }
 
-async fn fetch_requests(config: &Config, client: &SamplyHttpClient) -> Result<Vec<TaskRequest<HttpRequest>>, BeamConnectError> {
-    let req_to_proxy = Request::builder()
-        .uri(format!("{}v1/tasks?to={}&wait_count=1&filter=todo", config.proxy_url, config.my_app_id))
+async fn fetch_requests(config: &Config, client: &Client) -> Result<Vec<TaskRequest<HttpRequest>>, BeamConnectError> {
+    info!("fetching requests from proxy");
+    let resp = client
+        .get(format!("{}v1/tasks?to={}&wait_count=1&filter=todo", config.proxy_url, config.my_app_id))
         .header(header::AUTHORIZATION, config.proxy_auth.clone())
         .header(header::ACCEPT, "application/json")
-        .body(body::Body::empty())?;
-    info!("Requesting {req_to_proxy:?}");
-    let mut resp = client.request(req_to_proxy).await
-        .map_err(BeamConnectError::ProxyHyperError)?;
+        .send()
+        .await
+        .map_err(BeamConnectError::ProxyReqwestError)?;
     match resp.status() {
         StatusCode::OK => {
             info!("Got request: {:?}", resp);
@@ -134,15 +131,8 @@ async fn fetch_requests(config: &Config, client: &SamplyHttpClient) -> Result<Ve
             return Err(BeamConnectError::ProxyOtherError(format!("Got response code {}", resp.status())));
         }
     }
-    let bytes = body::to_bytes(resp.body_mut()).await
-        .map_err(BeamConnectError::ProxyHyperError)?;
-    let msgs = match serde_json::from_slice::<Vec<TaskRequest<HttpRequest>>>(&bytes) {
-        Err(e) => {
-            warn!("Unable to decode TaskRequest<HttpRequest>; error: {e}. Content: {}", String::from_utf8_lossy(&bytes));
-            return Err(e.into());
-        },
-        Ok(msgs) => msgs
-    };
-    debug!("Broker gave us {} tasks: {:?}", msgs.len(), msgs.first());
-    Ok(msgs)
+    resp.json().await.map_err(|e| {
+        warn!("Unable to decode TaskRequest<HttpRequest>; error: {e}.");
+        BeamConnectError::ProxyOtherError(e.to_string())
+    })
 }
