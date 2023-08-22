@@ -5,15 +5,16 @@ mod common;
 use common::*;
 
 pub async fn test_normal(scheme: &str) {
-    let req = Request::get(format!("{scheme}://postman-get?foo1=bar1&foo2=bar2")).body(Body::empty()).unwrap();
+    let req = Request::get(format!("{scheme}://echo-get?foo1=bar1&foo2=bar2")).body(Body::empty()).unwrap();
     let mut res = request(req).await;
     assert_eq!(res.status(), StatusCode::OK, "Could not make normal request via beam-connect");
     let bytes = hyper::body::to_bytes(res.body_mut()).await.unwrap();
     let received: Value = serde_json::from_slice(&bytes).unwrap();
-    assert_eq!(received.get("args").unwrap(), &json!({
+    assert_eq!(received.get("query").unwrap(), &json!({
         "foo1": "bar1",
         "foo2": "bar2"
     }), "Json did not match");
+    assert_eq!(received.get("path"), Some(&json!("/get/")))
 }
 
 pub async fn test_json(scheme: &str) {
@@ -22,12 +23,13 @@ pub async fn test_json(scheme: &str) {
         "bar": "foo",
         "foobar": false,
     });
-    let req = Request::post(format!("{scheme}://postman-post")).body(Body::from(serde_json::to_vec(&json).unwrap())).unwrap();
+    let req = Request::post(format!("{scheme}://echo-post")).body(Body::from(serde_json::to_vec(&json).unwrap())).unwrap();
     let mut res = request(req).await;
     assert_eq!(res.status(), StatusCode::OK, "Could not make json request via beam-connect");
     let bytes = hyper::body::to_bytes(res.body_mut()).await.unwrap();
     let received: Value = serde_json::from_slice(&bytes).unwrap();
-    assert_eq!(received.get("json").unwrap(), &json, "Json did not match");
+    assert_eq!(received.get("body").and_then(Value::as_str).and_then(|s| serde_json::from_str::<Value>(s).ok()).unwrap(), json, "Json did not match");
+    assert_eq!(received.get("path"), Some(&json!("/post/")))
 }
 
 
@@ -44,7 +46,7 @@ mod socket_tests {
     
     #[tokio::test]
     pub async fn test_ws() {
-        let resp = request(Request::get(format!("http://echo"))
+        let resp = request(Request::get(format!("http://ws-echo"))
             .header(header::UPGRADE, "websocket")
             .header(header::CONNECTION, "upgrade")
             .header(header::SEC_WEBSOCKET_VERSION, "13")

@@ -76,6 +76,7 @@ services:
      - 8063:8063
    volumes:
      - ../examples/:/map
+     - ssl-cert:/custom-cert
    environment:
      PROXY_URL: "http://proxy2:8082"
      BIND_ADDR: 0.0.0.0:8063
@@ -86,6 +87,7 @@ services:
      RUST_LOG: ${RUST_LOG}
      NO_PROXY: proxy2
      no_proxy: proxy2
+     TLS_CA_CERTIFICATES_DIR: /custom-cert
   proxy2:
     depends_on: [broker]
     image: samply/beam-proxy:${TAG}
@@ -103,10 +105,20 @@ services:
     secrets:
       - proxy2.pem
       - root.crt.pem
-  echo:
+  ws-echo:
     image: jmalloc/echo-server
     environment:
       PORT: 80
+  echo:
+    image: mendhak/http-https-echo
+    container_name: my.example.com # We set this so that we can connect via this common name so that the ssl cert CN matches
+    environment:
+        - HTTP_PORT=80
+        - HTTPS_PORT=443
+    volumes:
+      - ssl-cert:/app/custom-cert
+    entrypoint: ["sh", "-c", "cp ./fullchain.pem ./custom-cert/cert.pem && node ./index.js"]
+    user: "0:0"
 secrets:
   pki.secret:
     file: ./pki/pki.secret
@@ -118,3 +130,6 @@ secrets:
     file: ./pki/dummy.priv.pem
   root.crt.pem:
     file: ./pki/root.crt.pem
+
+volumes:
+  ssl-cert:
