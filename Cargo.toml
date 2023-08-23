@@ -22,13 +22,11 @@ beam-lib = { git = "https://github.com/samply/beam", branch="develop", features 
 
 tokio = { version = "1", features = ["macros","rt-multi-thread","signal"] }
 hyper = { version = "0.14", features = ["full"] }
-tower-http = { version = "0", features = ["trace"] }
-tower = "*"
 
 # HTTP client with proxy support
 reqwest = { version = "0.11.19", features = ["json", "stream"] }
 
-tracing = "0.1.35"
+tracing = "0.1"
 
 serde = "*"
 serde_json = "*"
