@@ -3,11 +3,11 @@ use serde::{Serialize, Deserialize};
 
 #[derive(Serialize,Deserialize, Debug)]
 pub(crate) struct HttpRequest {
-    #[serde(with = "hyper_serde")]
+    #[serde(with = "http_serde::method")]
     pub(crate) method: Method,
-    #[serde(with = "hyper_serde")]
+    #[serde(with = "http_serde::uri")]
     pub(crate) url: Uri,
-    #[serde(with = "hyper_serde")]
+    #[serde(with = "http_serde::header_map")]
     pub(crate) headers: HeaderMap,
     #[serde(with = "serde_base64")]
     pub(crate) body: Vec<u8>
@@ -15,9 +15,9 @@ pub(crate) struct HttpRequest {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct HttpResponse {
-    #[serde(with = "hyper_serde")]
+    #[serde(with = "http_serde::status_code")]
     pub(crate) status: StatusCode,
-    #[serde(with = "hyper_serde")]
+    #[serde(with = "http_serde::header_map")]
     pub(crate) headers: HeaderMap,
     #[serde(with = "serde_base64")]
     pub(crate) body: Vec<u8>
