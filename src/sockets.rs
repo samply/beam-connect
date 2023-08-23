@@ -152,37 +152,27 @@ async fn execute_http_task(mut req: Request<Body>, app: &AppId, config: &Config)
         None
     };
 
-    // See https://github.com/hyperium/hyper/blob/master/examples/client.rs#L42
-    let host = req.uri().host().expect("uri has no host");
-    let port = req.uri().port_u16().unwrap_or(80);
-    let addr = format!("{}:{}", host, port);
-    let client_socket = TcpStream::connect(&addr).await.map_err(|e| {
-        warn!("Connection to {addr} failed: {e}");
-        StatusCode::BAD_GATEWAY
-    })?;
-    let (mut sender, proxy_conn) = Builder::new()
-        .http1_preserve_header_case(true)
-        .http1_title_case_headers(true)
-        .handshake(client_socket)
+    let mut resp = config.client
+        .execute(req.try_into().expect("This should always convert"))
         .await
         .map_err(|e| {
-            warn!("Error executuing http task. Failed handshake with server({addr}): {e}");
+            warn!("Error executuing http task. Failed handshake with server: {e}");
             StatusCode::BAD_GATEWAY
         })?;
-    tokio::task::spawn(async move {
-        if let Err(err) = proxy_conn.await {
-            println!("Connection failed: {:?}", err);
-        }
-    });
-    let mut resp = sender.send_request(req).await.map_err(|e| {
-        warn!("Error sending request to destination server({addr}): {e}");
-        StatusCode::BAD_GATEWAY
-    })?;
 
     if req_upgrade.is_some() {
         tunnel_upgrade(resp.extensions_mut().remove::<OnUpgrade>(), req_upgrade);
     }
-    Ok(resp)
+    Ok(convert_to_hyper_response(resp))
+}
+
+// TODO: Make a PR to add into_parts for reqwest::Response or even a conversion trait impl to avoid clones
+fn convert_to_hyper_response(resp: Response) -> hyper::Response<Body> {
+    let mut builder = hyper::http::response::Builder::new()
+        .status(resp.status())
+        .version(resp.version());
+    builder.headers_mut().map(|headers| *headers = resp.headers().clone());
+    builder.body(hyper::Body::wrap_stream(resp.bytes_stream())).expect("This should always convert")
 }
 
 fn tunnel_upgrade(client: Option<OnUpgrade>, server: Option<OnUpgrade>) {
