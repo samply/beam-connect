@@ -21,7 +21,6 @@ services:
       BROKER_URL: ${BROKER_URL}
       PKI_ADDRESS: http://vault:8200
       no_proxy: vault
-      NO_PROXY: vault
       PRIVKEY_FILE: /run/secrets/dummy.pem
       BIND_ADDR: 0.0.0.0:8080
       RUST_LOG: ${RUST_LOG}
@@ -41,7 +40,6 @@ services:
       PRIVKEY_FILE: /run/secrets/proxy1.pem
       BIND_ADDR: 0.0.0.0:8081
       RUST_LOG: ${RUST_LOG}
-      NO_PROXY: broker
       no_proxy: broker
     secrets:
       - proxy1.pem
@@ -52,7 +50,6 @@ services:
     build:
       context: ../
       dockerfile: Dockerfile.ci
-    image: samply/beam-connect:${TAG}
     ports:
       - 8062:8062
     volumes:
@@ -63,15 +60,13 @@ services:
       PROXY_APIKEY: ${APP_KEY}
       DISCOVERY_URL: "./map/example_central_test.json"
       RUST_LOG: ${RUST_LOG}
-      NO_PROXY: proxy1
-      no_proxy: proxy1
+      no_proxy: proxy1,my.example.com
   connect2:
    depends_on:
      - proxy2
    build:
      context: ../
      dockerfile: Dockerfile.ci
-   image: samply/beam-connect:${TAG}
    ports:
      - 8063:8063
    volumes:
@@ -85,8 +80,7 @@ services:
      DISCOVERY_URL: "./map/example_central_test.json"
      LOCAL_TARGETS_FILE: "./map/example_local_test.json"
      RUST_LOG: ${RUST_LOG}
-     NO_PROXY: proxy2
-     no_proxy: proxy2
+     no_proxy: proxy2,my.example.com
      TLS_CA_CERTIFICATES_DIR: /custom-cert
   proxy2:
     depends_on: [broker]
@@ -100,7 +94,6 @@ services:
       PRIVKEY_FILE: /run/secrets/proxy2.pem
       BIND_ADDR: 0.0.0.0:8082
       RUST_LOG: ${RUST_LOG}
-      NO_PROXY: broker
       no_proxy: broker
     secrets:
       - proxy2.pem

@@ -1,20 +1,13 @@
 use std::{sync::Arc, str::FromStr};
-use std::time::{Duration, SystemTime};
-use hyper::Method;
 use hyper::http::HeaderValue;
 use hyper::http::uri::{Authority, Scheme};
-use hyper::server::conn::Http;
-use hyper::service::service_fn;
-use hyper::{Request, Body, Client, client::HttpConnector, Response, header, StatusCode, body, Uri};
-use hyper_proxy::ProxyConnector;
-use hyper_tls::HttpsConnector;
+use hyper::{Request, Body, Response, header, StatusCode, body, Uri};
 use tracing::{info, debug, warn, error};
 use serde_json::Value;
-use shared::http_client::SamplyHttpClient;
 use beam_lib::{AppId, TaskResult, TaskRequest, WorkStatus, FailureStrategy, MsgId};
 
 use crate::config::CentralMapping;
-use crate::{config::Config, structs::MyStatusCode, msg::{HttpRequest, HttpResponse}, errors::BeamConnectError};
+use crate::{config::Config, structs::MyStatusCode, msg::{HttpRequest, HttpResponse}};
 
 /// GET   http://some.internal.system?a=b&c=d
 /// Host: <identical>
@@ -91,14 +84,12 @@ async fn handle_via_tasks(req: Request<Body>, config: &Arc<Config>, target: &App
     let msg = http_req_to_struct(req, &config.my_app_id, &target, config.expire).await?;
 
     // Send to Proxy
-    let req_to_proxy = Request::builder()
-        .method("POST")
-        .uri(format!("{}v1/tasks", config.proxy_url))
+    debug!("SENDING request to Proxy: {msg:?}");
+    let resp = config.client.post(format!("{}v1/tasks", config.proxy_url))
         .header(header::AUTHORIZATION, auth.clone())
-        .body(body::Body::from(serde_json::to_vec(&msg)?))
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    debug!("SENDING request to Proxy: {:?}, {:?}", msg, req_to_proxy);
-    let resp = config.client.request(req_to_proxy).await
+        .json(&msg)
+        .send()
+        .await
         .map_err(|_| StatusCode::BAD_GATEWAY)?;
     if resp.status() != StatusCode::CREATED {
         return Err(StatusCode::BAD_GATEWAY.into());
@@ -117,12 +108,12 @@ async fn handle_via_tasks(req: Request<Body>, config: &Arc<Config>, target: &App
         .path_and_query(format!("{}/results?wait_count=1&wait_timeout=10000", location.path()))
         .build().unwrap(); // TODO
     debug!("Fetching reply from Proxy: {results_uri}");
-    let req = Request::builder()
+    let resp = config.client
+        .get(results_uri.to_string())
         .header(header::AUTHORIZATION, auth)
         .header(header::ACCEPT, "application/json")
-        .uri(results_uri)
-        .body(body::Body::empty()).unwrap();
-    let mut resp = config.client.request(req).await
+        .send()
+        .await
         .map_err(|e| {
             warn!("Got error from server: {e}");
             StatusCode::BAD_GATEWAY
@@ -143,9 +134,7 @@ async fn handle_via_tasks(req: Request<Body>, config: &Arc<Config>, target: &App
         }
     }
 
-    let bytes = body::to_bytes(resp.body_mut()).await
-        .map_err(|_| StatusCode::BAD_GATEWAY)?;
-    let mut task_results = serde_json::from_slice::<Vec<TaskResult<HttpResponse>>>(&bytes)
+    let mut task_results = resp.json::<Vec<TaskResult<HttpResponse>>>().await
         .map_err(|e| {
             warn!("Unable to parse HTTP result: {}", e);
             StatusCode::BAD_GATEWAY

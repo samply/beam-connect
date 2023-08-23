@@ -11,7 +11,7 @@ pub(crate) enum BeamConnectError {
     #[error("Proxy rejected our authorization")]
     ProxyRejectedAuthorization,
     #[error("Unable to communicate with Proxy: {0}")]
-    ProxyHyperError(hyper::Error),
+    ProxyReqwestError(reqwest::Error),
     #[error("Unable to communicate with Proxy: {0}")]
     ProxyOtherError(String),
     #[error("Constructing HTTP request failed: {0}")]
@@ -23,7 +23,7 @@ pub(crate) enum BeamConnectError {
     #[error("Unable to communicate with target host: {0}")]
     CommunicationWithTargetFailed(String),
     #[error("Unable to fetch reply from target host: {0}")]
-    FailedToReadTargetsReply(hyper::Error),
+    FailedToReadTargetsReply(reqwest::Error),
     #[error("Response was not valid UTF-8: {0}")]
     ResponseNotValidUtf8String(#[from] FromUtf8Error),
     #[error("Reply invalid: {0}")]

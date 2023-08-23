@@ -1,8 +1,9 @@
-use std::{error::Error, path::PathBuf, fs::read_to_string, str::FromStr, sync::Arc};
+use std::{path::PathBuf, fs::{read_to_string, self}, str::FromStr, sync::Arc};
 
+use anyhow::Result;
 use clap::Parser;
 use hyper::{Uri, http::uri::Authority};
-use shared::http_client::{SamplyHttpClient, self};
+use reqwest::{Certificate, Client};
 use tokio_native_tls::{TlsAcceptor, native_tls::{self, Identity}};
 use serde::{Serialize, Deserialize};
 use beam_lib::{AppId, set_broker_id};
@@ -21,7 +22,7 @@ impl FromStr for PathOrUri {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match Uri::try_from(s) {
             Ok(uri) => Ok(Self::Uri(uri)),
-            Err(e_uri) => {
+            Err(..) => {
                 let p = PathBuf::from(s);
                 if p.is_file() {
                     Ok(Self::Path(p))
@@ -173,12 +174,12 @@ pub(crate) struct Config {
     pub(crate) targets_local: LocalMapping,
     pub(crate) targets_public: CentralMapping,
     pub(crate) expire: u64,
-    pub(crate) client: SamplyHttpClient,
+    pub(crate) client: Client,
     pub(crate) tls_acceptor: Arc<TlsAcceptor>,
     pub(crate) no_auth: bool,
 }
 
-fn load_local_targets(broker_id: &str, local_target_path: &Option<PathBuf>) -> Result<LocalMapping,Box<dyn Error>> {
+fn load_local_targets(broker_id: &str, local_target_path: &Option<PathBuf>) -> Result<LocalMapping> {
     if let Some(json_file) = local_target_path {
         if json_file.exists() {
             let json_string = std::fs::read_to_string(json_file)?;
@@ -188,33 +189,37 @@ fn load_local_targets(broker_id: &str, local_target_path: &Option<PathBuf>) -> R
     Ok(example_targets::example_local(broker_id))
 }
 
-async fn load_public_targets(client: &SamplyHttpClient, url: &PathOrUri) -> Result<CentralMapping,BeamConnectError> {
-    let bytes = match url {
+async fn load_public_targets(client: &Client, url: &PathOrUri) -> Result<CentralMapping, BeamConnectError> {
+    match url {
         PathOrUri::Path(path) => {
-            std::fs::read_to_string(path).map_err(|e| BeamConnectError::ConfigurationError(format!("Failed to open central config file: {e}")))?.into()
+            serde_json::from_slice(&std::fs::read(path).map_err(|e| BeamConnectError::ConfigurationError(format!("Failed to open central config file: {e}")))?)
         },
         PathOrUri::Uri(url) => {
-            let mut response = client.get(url
-                    .to_string()
-                    .try_into()
-                    .map_err(|e| BeamConnectError::ConfigurationError(format!("Invalid url for public sites: {e}")))?
-                ).await
-                .map_err(|e| BeamConnectError::ConfigurationError(format!("Cannot retrieve central service discovery configuration: {e}"))
-            )?;
-
-            let body = response.body_mut();
-            hyper::body::to_bytes(body).await.map_err(|e| BeamConnectError::ConfigurationError(format!("Invalid central site discovery response: {e}")))?
+            Ok(client.get(url.to_string())
+                .send().await
+                .map_err(|e| BeamConnectError::ConfigurationError(format!("Cannot retrieve central service discovery configuration: {e}")))?
+                .json()
+                .await
+                .map_err(|e| BeamConnectError::ConfigurationError(format!("Invalid central site discovery response: {e}")))?
+            )
         },
-    };
+    }.map_err(|e| BeamConnectError::ConfigurationError(format!("Cannot parse central service discovery configuration: {e}")))
+}
 
-    let deserialized = serde_json::from_slice::<CentralMapping>(&bytes)
-        .map_err(|e| BeamConnectError::ConfigurationError(format!("Cannot parse central service discovery configuration: {e}")))?;
-
-    Ok(deserialized)
+fn build_client(tls_cert_dir: Option<&PathBuf>) -> Result<Client> {
+    let mut client_builder = Client::builder();
+    if let Some(tls_ca_dir) = tls_cert_dir {
+        for path_res in tls_ca_dir.read_dir()? {
+            if let Ok(path_buf) = path_res {
+                client_builder = client_builder.add_root_certificate(Certificate::from_pem(&fs::read(path_buf.path())?)?);
+            }
+        }
+    }
+    Ok(client_builder.build()?)
 }
 
 impl Config {
-    pub(crate) async fn load() -> Result<Self, Box<dyn Error>> {
+    pub(crate) async fn load() -> Result<Self> {
         let args = CliArgs::parse();
         let broker_id = args.app_id
             .splitn(3, '.')
@@ -224,9 +229,7 @@ impl Config {
         let app_id = AppId::new(&args.app_id)?;
     
         let expire = args.expire;
-
-        let tls_ca_certificates = shared::crypto::load_certificates_from_dir(args.tls_ca_certificates_dir)?;
-        let client = http_client::build(&tls_ca_certificates, None, None)?;
+        let client = build_client(args.tls_ca_certificates_dir.as_ref())?;
 
         let targets_public = load_public_targets(&client, &args.discovery_url).await?;
         let targets_local = load_local_targets(&broker_id, &args.local_targets_file)?;
