@@ -52,7 +52,6 @@ services:
     build:
       context: ../
       dockerfile: Dockerfile.ci
-    image: samply/beam-connect:${TAG}
     ports:
       - 8062:8062
     volumes:
@@ -71,7 +70,6 @@ services:
    build:
      context: ../
      dockerfile: Dockerfile.ci
-   image: samply/beam-connect:${TAG}
    ports:
      - 8063:8063
    volumes:
