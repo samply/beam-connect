@@ -104,7 +104,7 @@ async fn execute_http_task(task: &TaskRequest<HttpRequest>, config: &Config, cli
 
     info!("Rewritten to: {} {}", task_req.method, uri);
     let resp = client
-        .request(task_req.method.clone(), task_req.url.to_string())
+        .request(task_req.method.clone(), uri.to_string())
         .headers(task_req.headers.clone())
         .body(body::Body::from(task_req.body.clone()))
         .send()
