@@ -1,4 +1,5 @@
-use hyper::StatusCode;
+use hyper::{StatusCode, header};
+use reqwest::Client;
 use serde_json::{Value, json};
 
 mod common;
@@ -27,6 +28,28 @@ pub async fn test_json(scheme: &str) {
     assert_eq!(received.get("body").and_then(Value::as_str).and_then(|s| serde_json::from_str::<Value>(s).ok()).unwrap(), json, "Json did not match");
     assert_eq!(received.get("path"), Some(&json!("/post/")))
 }
+
+#[tokio::test] 
+pub async fn test_empty_authority() { // Test only works with http, so no macro usage
+    let client = Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .unwrap();
+    let res = client.get("http://localhost:8062")
+        .query(&[("foo1","bar1"),("foo2","bar2")])
+        .header(header::HOST, "echo-get")
+        .header(header::PROXY_AUTHORIZATION, "ApiKey app1.proxy1.broker App1Secret")
+        .send().await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "Could not make normal request via beam-connect");
+    let received: Value = res.json().await.unwrap();
+    assert_eq!(received.get("query").unwrap(), &json!({
+        "foo1": "bar1",
+        "foo2": "bar2"
+    }), "Json did not match");
+    assert_eq!(received.get("path"), Some(&json!("/get/")))
+}
+
 
 
 test_http_and_https!{test_normal}

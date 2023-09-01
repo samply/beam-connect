@@ -21,7 +21,13 @@ pub(crate) async fn handler_http(
     let targets = &config.targets_public;
     let method = req.method().to_owned();
     let uri = req.uri().to_owned();
-    let Some(authority) = https_authority.as_ref().or(uri.authority()) else {
+
+    let host_header_auth = req.headers().get(header::HOST).and_then(|v| v.to_str().ok()).and_then(|v| Authority::from_str(v).ok());
+    let authority = https_authority
+        .as_ref()
+        .or(uri.authority())
+        .or(host_header_auth.as_ref());
+    let Some(authority) = authority else {
         return if uri.path() == "/sites" {
             // Case 1 for sites request: no authority set and /sites
             respond_with_sites(targets)
