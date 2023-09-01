@@ -25,15 +25,15 @@ pub(crate) async fn handler_http(
     let host_header_auth = req.headers().get(header::HOST).and_then(|v| v.to_str().ok()).and_then(|v| Authority::from_str(v).ok());
     let authority = https_authority
         .as_ref()
-        .or(uri.authority())
+        .or(uri.authority());
+    if authority.is_none() && uri.path() == "/site" {
+            // Case 1 for sites request: no authority set and /sites
+            return respond_with_sites(targets)
+    }
+    let authority = authority
         .or(host_header_auth.as_ref());
     let Some(authority) = authority else {
-        return if uri.path() == "/sites" {
-            // Case 1 for sites request: no authority set and /sites
-            respond_with_sites(targets)
-        } else {
-            Err(StatusCode::BAD_REQUEST.into())
-        }
+            return Err(StatusCode::BAD_REQUEST.into())
     };
     let headers = req.headers_mut();
 
