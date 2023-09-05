@@ -41,7 +41,7 @@ anyhow = "1"
 openssl = "*" # Already used by native_tls which does not reexport it. This is used for b64 en/decode
 
 [features]
-sockets = []
+sockets = ["beam-lib/sockets"]
 
 [build-dependencies]
 build-data = "0"
