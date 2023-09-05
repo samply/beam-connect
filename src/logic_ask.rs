@@ -26,7 +26,7 @@ pub(crate) async fn handler_http(
     let authority = https_authority
         .as_ref()
         .or(uri.authority());
-    if authority.is_none() && uri.path() == "/site" {
+    if authority.is_none() && uri.path() == "/sites" {
             // Case 1 for sites request: no authority set and /sites
             return respond_with_sites(targets)
     }
