@@ -1,5 +1,5 @@
 
-use clap::__derive_refs::once_cell::sync::Lazy;
+use once_cell::sync::Lazy;
 use hyper::{header, http::HeaderValue, HeaderMap};
 use reqwest::{Client, Proxy};
 

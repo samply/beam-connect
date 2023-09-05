@@ -47,6 +47,7 @@ sockets = ["beam-lib/sockets"]
 build-data = "0"
 
 [dev-dependencies]
+once_cell = "1"
 futures-util = "0.3.28"
 paste = "1.0.12"
 tokio-tungstenite = "0.20.0"
