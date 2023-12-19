@@ -1,7 +1,27 @@
 [
     {
-        "external": "httpbin.org",
-        "internal": "httpbin.org",
+        "external": "echo-get",
+        "internal": "my.example.com/get",
+        "allowed": ["app1.proxy1.broker"]
+    },
+    {
+        "external": "echo-post",
+        "internal": "my.example.com/post",
+        "allowed": ["app1.proxy1.broker"]
+    },
+    {
+        "external": "echo-get:443",
+        "internal": "my.example.com:443/get",
+        "allowed": ["app1.proxy1.broker"]
+    },
+    {
+        "external": "echo-post:443",
+        "internal": "my.example.com:443/post",
+        "allowed": ["app1.proxy1.broker"]
+    },
+    {
+        "external": "ws-echo",
+        "internal": "ws-echo:80",
         "allowed": ["app1.proxy1.broker"]
     }
 ]

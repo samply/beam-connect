@@ -1,4 +1,4 @@
-use log::info;
+use tracing::info;
 
 pub fn print_banner() {
     let commit = match env!("GIT_DIRTY") {

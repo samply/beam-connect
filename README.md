@@ -34,13 +34,16 @@ The following command line parameters are required:
  * `PROXY_URL`: The URL of the local Samply.Proxy which is used to connect to the Samply.Broker
  * `APP_ID`: The BeamId of the Beam.Connect application 
  * `LOCAL_TARGETS_FILE`: The path to the local service resolution file (see [Routing Section](#Request-Routing)).
- * `DISCOVERY_URL`: The URL that is queried to receive the central service discovery this may also be a local file (see [Routing Section](#Request-Routing)).
+ * `DISCOVERY_URL`: The URL (or local file) to be is queried to receive the central service discovery (see [Routing Section](#Request-Routing)).
  
 The following command line parameter is only used in Receiver mode (see [Usage Section](#usage)):
  * `PROXY_APIKEY`: In Receiver Mode, the API key with which this Beam.Connector is registered for listening at the Samply.Broker
  
 The following command line parameter is optional, as it uses a default value:
  * `BIND_ADDR`: The interface and port Beam.Connect is listening on. Defaults to `0.0.0.0:8062`.
+
+If the following flag is optional.
+ * `NO_AUTH`:  Samply.Beam.Connect does not require a `Proxy Authorization` header, i.e. it forwards requests without (client) authentication
 
 All parameters can be given as environment variables instead.
 
@@ -58,9 +61,10 @@ docker run -e PROXY_URL='<PROXY_URL>' \
            -e DISCOVERY_URL='<DISCOVERY_URL>' \
            -e PROXY_APIKEY='<PROXY_APIKEY>' \
            -e BIND_ADDR='<BIND_ADDR>' \
+           -e NO_AUTH='true' \
            samply/beam-connect
 ```
-Again, the last environment variable `PROXY_APIKEY` is only required for usage in Receiver Mode and `BIND_ADDR` is optional.
+Again, the environment variable `PROXY_APIKEY` is only required for usage in Receiver Mode. `BIND_ADDR` and `NO_AUTH` are optional.
 
 ### Use Beam.Connect to forward a HTTP request
 We give an example [cURL](https://curl.se/) request showing the usage of Beam.Connect to access an internal service within University Hospital #23 (`uk23`):
@@ -87,7 +91,14 @@ A mishap in communication will be returned as appropriate HTTP replies.
 
 As described in the [command line parameter list](#run-as-an-application), the central cite discovery is fetched from a given URL or local json file. However, to spare the local services from the need to express outward facing connections themselves, Samply.Beam.Connect exports this received information as a local REST endpoint: `GET http://<beam_connect_url>:<beam_connect_port>/sites`. Note, that the information is only fetched at startup and remains static for the program's lifetime.
 
+#### HTTPS support
+
+Https is supported but requires setting up the following parameters:
+* `SSL_CERT_PEM`: Location to the pem file used for incoming SSL connections.
+* `SSL_CERT_KEY`: Location to the corresponding key file for the SSL connections.
+* `TLS_CA_CERTIFICATES_DIR`: May need to be set if the local target uses a self signed certificate which is not trusted by beam-connect. In this case the certificate of the target must be placed inside `TLS_CA_CERTIFICATES_DIR` as a pem file in order to be trusted.
+
 ## Notes
-At the moment Samply.Beam.Connect does not implement streaming and does not support HTTPS connections. In the intended usage scenario, both Samply.Beam.Connect and Samply.Beam.Proxy are positioned right next to each other in the same privileged network and thus speak plain HTTP. Of course, for outgoing traffic, the Samply.Proxy signs and encrypts the payloads on its own.
+At the moment Samply.Beam.Connect does not implement streaming. In the intended usage scenario, both Samply.Beam.Connect and Samply.Beam.Proxy are positioned right next to each other in the same privileged network and thus speak plain HTTP or [HTTPS if configured](#https). Of course, for outgoing traffic, the Samply.Proxy signs and encrypts the payloads on its own.
 
 In Receiving Mode, Beam.Connect only relays requests to allow-listed resources to mitigate possible misuse.

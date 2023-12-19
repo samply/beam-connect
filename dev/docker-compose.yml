@@ -1,7 +1,7 @@
 version: "3.7"
 services:
   vault:
-    image: vault
+    image: hashicorp/vault
     ports:
       - 127.0.0.1:8200:8200
     environment:
@@ -21,7 +21,6 @@ services:
       BROKER_URL: ${BROKER_URL}
       PKI_ADDRESS: http://vault:8200
       no_proxy: vault
-      NO_PROXY: vault
       PRIVKEY_FILE: /run/secrets/dummy.pem
       BIND_ADDR: 0.0.0.0:8080
       RUST_LOG: ${RUST_LOG}
@@ -37,12 +36,10 @@ services:
     environment:
       BROKER_URL: ${BROKER_URL}
       PROXY_ID: ${PROXY1_ID}
-      APP_0_ID: ${APP1_ID_SHORT}
-      APP_0_KEY: ${APP_KEY}
+      APP_app1_KEY: ${APP_KEY}
       PRIVKEY_FILE: /run/secrets/proxy1.pem
       BIND_ADDR: 0.0.0.0:8081
       RUST_LOG: ${RUST_LOG}
-      NO_PROXY: broker
       no_proxy: broker
     secrets:
       - proxy1.pem
@@ -53,7 +50,6 @@ services:
     build:
       context: ../
       dockerfile: Dockerfile.ci
-    image: samply/beam-connect:${TAG}
     ports:
       - 8062:8062
     volumes:
@@ -64,19 +60,18 @@ services:
       PROXY_APIKEY: ${APP_KEY}
       DISCOVERY_URL: "./map/example_central_test.json"
       RUST_LOG: ${RUST_LOG}
-      NO_PROXY: proxy1
-      no_proxy: proxy1
+      no_proxy: proxy1,my.example.com
   connect2:
    depends_on:
      - proxy2
    build:
      context: ../
      dockerfile: Dockerfile.ci
-   image: samply/beam-connect:${TAG}
    ports:
      - 8063:8063
    volumes:
      - ../examples/:/map
+     - ssl-cert:/custom-cert
    environment:
      PROXY_URL: "http://proxy2:8082"
      BIND_ADDR: 0.0.0.0:8063
@@ -85,8 +80,8 @@ services:
      DISCOVERY_URL: "./map/example_central_test.json"
      LOCAL_TARGETS_FILE: "./map/example_local_test.json"
      RUST_LOG: ${RUST_LOG}
-     NO_PROXY: proxy2
-     no_proxy: proxy2
+     no_proxy: proxy2,my.example.com
+     TLS_CA_CERTIFICATES_DIR: /custom-cert
   proxy2:
     depends_on: [broker]
     image: samply/beam-proxy:${TAG}
@@ -95,16 +90,28 @@ services:
     environment:
       BROKER_URL: ${BROKER_URL}
       PROXY_ID: ${PROXY2_ID}
-      APP_0_ID: ${APP2_ID_SHORT}
-      APP_0_KEY: ${APP_KEY}
+      APP_app2_KEY: ${APP_KEY}
       PRIVKEY_FILE: /run/secrets/proxy2.pem
       BIND_ADDR: 0.0.0.0:8082
       RUST_LOG: ${RUST_LOG}
-      NO_PROXY: broker
       no_proxy: broker
     secrets:
       - proxy2.pem
       - root.crt.pem
+  ws-echo:
+    image: jmalloc/echo-server
+    environment:
+      PORT: 80
+  echo:
+    image: mendhak/http-https-echo
+    container_name: my.example.com # We set this so that we can connect via this common name so that the ssl cert CN matches
+    environment:
+        - HTTP_PORT=80
+        - HTTPS_PORT=443
+    volumes:
+      - ssl-cert:/app/custom-cert
+    entrypoint: ["sh", "-c", "cp ./fullchain.pem ./custom-cert/cert.pem && node ./index.js"]
+    user: "0:0"
 secrets:
   pki.secret:
     file: ./pki/pki.secret
@@ -116,3 +123,6 @@ secrets:
     file: ./pki/dummy.priv.pem
   root.crt.pem:
     file: ./pki/root.crt.pem
+
+volumes:
+  ssl-cert:

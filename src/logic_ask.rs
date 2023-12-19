@@ -1,14 +1,13 @@
 use std::{sync::Arc, str::FromStr};
-use std::time::{Duration, SystemTime};
-use hyper::{Request, Body, Client, client::HttpConnector, Response, header, StatusCode, body, Uri};
-use hyper_proxy::ProxyConnector;
-use hyper_tls::HttpsConnector;
-use log::{info, debug, warn, error};
+use hyper::http::HeaderValue;
+use hyper::http::uri::{Authority, Scheme};
+use hyper::{Request, Body, Response, header, StatusCode, body, Uri};
+use tracing::{info, debug, warn, error};
 use serde_json::Value;
-use shared::http_client::SamplyHttpClient;
-use shared::{beam_id::AppId, MsgTaskResult, MsgTaskRequest};
+use beam_lib::{AppId, TaskResult, TaskRequest, WorkStatus, FailureStrategy, MsgId};
 
-use crate::{config::Config, structs::MyStatusCode, msg::{HttpRequest, HttpResponse}, errors::BeamConnectError};
+use crate::config::CentralMapping;
+use crate::{config::Config, structs::MyStatusCode, msg::{HttpRequest, HttpResponse}};
 
 /// GET   http://some.internal.system?a=b&c=d
 /// Host: <identical>
@@ -16,56 +15,90 @@ use crate::{config::Config, structs::MyStatusCode, msg::{HttpRequest, HttpRespon
 pub(crate) async fn handler_http(
     mut req: Request<Body>,
     config: Arc<Config>,
-    client: SamplyHttpClient
+    https_authority: Option<Authority>,
 ) -> Result<Response<Body>, MyStatusCode> {
+
     let targets = &config.targets_public;
     let method = req.method().to_owned();
     let uri = req.uri().to_owned();
+
+    let host_header_auth = req.headers()
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| dbg!(Authority::from_str(v)).ok());
+    let authority = https_authority
+        .as_ref()
+        .or(uri.authority());
+    if authority.is_none() && uri.path() == "/sites" {
+            // Case 1 for sites request: no authority set and /sites
+            return respond_with_sites(targets)
+    }
+    let authority = authority
+        .or(host_header_auth.as_ref());
+    let Some(authority) = authority else {
+            return Err(StatusCode::BAD_REQUEST.into())
+    };
     let headers = req.headers_mut();
 
     headers.insert(header::VIA, format!("Via: Samply.Beam.Connect/0.1 {}", config.my_app_id).parse().unwrap());
 
-    let auth = 
-        headers.remove(header::PROXY_AUTHORIZATION)
-            .ok_or(StatusCode::PROXY_AUTHENTICATION_REQUIRED)?;
+    let auth = if config.no_auth {
+        headers
+            .remove(header::PROXY_AUTHORIZATION)
+            .unwrap_or(config.proxy_auth.parse().expect("Proxy auth header could not be generated."))
+    } else {
+        headers.remove(header::PROXY_AUTHORIZATION).ok_or(StatusCode::PROXY_AUTHENTICATION_REQUIRED)?
+    };
 
     // Re-pack Authorization: Not necessary since we're not looking at the Authorization header.
     // if headers.remove(header::AUTHORIZATION).is_some() {
     //     return Err(StatusCode::CONFLICT.into());
     // }
 
-    // If the autority is empty (e.g. if localhost is used) or the authoroty is not in the routing
-    // table AND the path is /sites, return global routing table
-    if let Some(path) = uri.path_and_query() { 
-        if (uri.authority().is_none() || targets.get(uri.authority().unwrap()).is_none()) && path == "/sites" {
-            debug!("Central Site Discovery requested");
-            let body = body::Body::from(serde_json::to_string(targets)?);
-            let response = Response::builder()
-                .status(200)
-                .body(body)
-                .unwrap();
-            return Ok(response);
-
-        }
-    }
-
-    let target = &targets.get(uri.authority().unwrap()) //TODO unwrap
-        .ok_or(StatusCode::UNAUTHORIZED)?
-        .beamconnect;
+    let Some(target) = &targets
+        .get(authority)
+        .map(|target| &target.beamconnect) else {
+            return if uri.path() == "/sites" {
+                // Case 2: target not in sites and /sites
+                respond_with_sites(targets)
+            } else {
+                warn!("Failed to lookup virtualhost in central mapping: {}", authority);
+                Err(StatusCode::UNAUTHORIZED.into())
+            }
+        };
 
     info!("{method} {uri} via {target}");
 
-    let msg = http_req_to_struct(req, &config.my_app_id, &target, &config.expire).await?;
+    // Set the right authority as it might have been passed by the caller because it was a CONNECT request
+    *req.uri_mut() = {
+        let mut parts = req.uri().to_owned().into_parts();
+        parts.authority = Some(authority.clone());
+        if https_authority.is_some() {
+            parts.scheme = Some(Scheme::HTTPS);
+        } else {
+            parts.scheme = Some(Scheme::HTTP);
+        }
+        Uri::from_parts(parts).map_err(|e| {
+            warn!("Could not transform uri authority: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+    };
+    #[cfg(feature = "sockets")]
+    return crate::sockets::handle_via_sockets(req, &config, target, auth).await;
+    #[cfg(not(feature = "sockets"))]
+    return handle_via_tasks(req, &config, target, auth).await;
+}
+
+async fn handle_via_tasks(req: Request<Body>, config: &Arc<Config>, target: &AppId, auth: HeaderValue) -> Result<Response<Body>, MyStatusCode> {
+    let msg = http_req_to_struct(req, &config.my_app_id, &target, config.expire).await?;
 
     // Send to Proxy
-    let req_to_proxy = Request::builder()
-        .method("POST")
-        .uri(format!("{}v1/tasks", config.proxy_url))
+    debug!("SENDING request to Proxy: {msg:?}");
+    let resp = config.client.post(format!("{}v1/tasks", config.proxy_url))
         .header(header::AUTHORIZATION, auth.clone())
-        .body(body::Body::from(serde_json::to_vec(&msg)?))
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    debug!("SENDING request to Proxy: {:?}, {:?}", msg, req_to_proxy);
-    let resp = client.request(req_to_proxy).await
+        .json(&msg)
+        .send()
+        .await
         .map_err(|_| StatusCode::BAD_GATEWAY)?;
     if resp.status() != StatusCode::CREATED {
         return Err(StatusCode::BAD_GATEWAY.into());
@@ -84,12 +117,12 @@ pub(crate) async fn handler_http(
         .path_and_query(format!("{}/results?wait_count=1&wait_timeout=10000", location.path()))
         .build().unwrap(); // TODO
     debug!("Fetching reply from Proxy: {results_uri}");
-    let req = Request::builder()
+    let resp = config.client
+        .get(results_uri.to_string())
         .header(header::AUTHORIZATION, auth)
         .header(header::ACCEPT, "application/json")
-        .uri(results_uri)
-        .body(body::Body::empty()).unwrap();
-    let mut resp = client.request(req).await
+        .send()
+        .await
         .map_err(|e| {
             warn!("Got error from server: {e}");
             StatusCode::BAD_GATEWAY
@@ -110,9 +143,7 @@ pub(crate) async fn handler_http(
         }
     }
 
-    let bytes = body::to_bytes(resp.body_mut()).await
-        .map_err(|_| StatusCode::BAD_GATEWAY)?;
-    let mut task_results = serde_json::from_slice::<Vec<MsgTaskResult>>(&bytes)
+    let mut task_results = resp.json::<Vec<TaskResult<HttpResponse>>>().await
         .map_err(|e| {
             warn!("Unable to parse HTTP result: {}", e);
             StatusCode::BAD_GATEWAY
@@ -125,14 +156,11 @@ pub(crate) async fn handler_http(
     }
     let result = task_results.pop().unwrap();
     let response_inner = match result.status {
-        shared::WorkStatus::Succeeded => {
-            serde_json::from_str::<HttpResponse>(&result.body.body.ok_or({
-                warn!("Recieved one sucessfull result but it has no body");
-                StatusCode::BAD_GATEWAY
-            })?)?
+        WorkStatus::Succeeded => {
+            result.body
         },
         e => {
-            warn!("Reply had unexpected workresult code: {}", e);
+            warn!("Reply had unexpected workresult code: {e:?}");
             return Err(StatusCode::BAD_GATEWAY)?;
         }
     };
@@ -159,32 +187,43 @@ pub(crate) async fn handler_http(
     Ok(resp)
 }
 
-async fn http_req_to_struct(req: Request<Body>, my_id: &AppId, target_id: &AppId, expire: &u64) -> Result<MsgTaskRequest, MyStatusCode> {
+async fn http_req_to_struct(req: Request<Body>, my_id: &AppId, target_id: &AppId, expire: u64) -> Result<TaskRequest<HttpRequest>, MyStatusCode> {
     let method = req.method().clone();
     let url = req.uri().clone();
     let headers = req.headers().clone();
     let body = body::to_bytes(req).await
         .map_err(|e| {
-            println!("{e}");
+            warn!("Failed to read body: {e}");
             StatusCode::BAD_REQUEST
     })?;
-    let body = String::from_utf8(body.to_vec())?;
 
     let http_req = HttpRequest {
         method,
         url,
         headers,
-        body,
+        body: body.to_vec(),
     };
-    let mut msg = MsgTaskRequest::new(
-        my_id.into(),
-        vec![target_id.into()],
-        serde_json::to_string(&http_req)?,
-        shared::FailureStrategy::Discard,
-        Value::Null
-    );
-
-    msg.expire = SystemTime::now() + Duration::from_secs(*expire);
+    let msg = TaskRequest {
+        from: my_id.clone().into(),
+        to: vec![target_id.clone().into()],
+        body: http_req,
+        failure_strategy: FailureStrategy::Discard,
+        metadata: Value::Null,
+        ttl: format!("{expire}s"),
+        id: MsgId::new()
+    };
     
     Ok(msg)
+}
+
+/// If the authority is empty (e.g. if localhost is used) or the authoroty is not in the routing
+/// table AND the path is /sites, return global routing table
+fn respond_with_sites(targets: &CentralMapping) -> Result<Response<Body>, MyStatusCode> {
+    debug!("Central Site Discovery requested");
+    let body = body::Body::from(serde_json::to_string(targets)?);
+    let response = Response::builder()
+        .status(200)
+        .body(body)
+        .unwrap();
+    Ok(response)
 }
