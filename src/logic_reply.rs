@@ -91,7 +91,11 @@ async fn execute_http_task(task: &TaskRequest<HttpRequest>, config: &Config, cli
     let mut uri = Uri::builder();
     // Normal non CONNECT http request replacement
     if let Some(scheme) = task_req.url.scheme_str() {
-        uri = uri.scheme(scheme);
+        if target.force_https {
+            uri = uri.scheme(hyper::http::uri::Scheme::HTTPS);
+        } else {
+            uri = uri.scheme(scheme);
+        }
         uri = if let Some(path) = target.replace.path {
             uri.path_and_query(&format!("/{path}{}", task_req.url.path_and_query().unwrap_or(&PathAndQuery::from_static(""))))
         } else {
