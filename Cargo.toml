@@ -21,7 +21,7 @@ strip = false
 beam-lib = { git = "https://github.com/samply/beam", branch="develop", features = ["strict-ids"] }
 
 tokio = { version = "1", features = ["macros","rt-multi-thread","signal"] }
-hyper = { version = "0.14", features = ["full"] }
+hyper = { version = "1.1", features = ["full"] }
 
 # HTTP client with proxy support
 reqwest = { version = "0.11.19", features = ["json", "stream"] }
