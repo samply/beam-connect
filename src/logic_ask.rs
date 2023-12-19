@@ -22,7 +22,10 @@ pub(crate) async fn handler_http(
     let method = req.method().to_owned();
     let uri = req.uri().to_owned();
 
-    let host_header_auth = req.headers().get(header::HOST).and_then(|v| v.to_str().ok()).and_then(|v| Authority::from_str(v).ok());
+    let host_header_auth = req.headers()
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| dbg!(Authority::from_str(v)).ok());
     let authority = https_authority
         .as_ref()
         .or(uri.authority());

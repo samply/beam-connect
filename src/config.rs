@@ -131,7 +131,9 @@ pub(crate) struct LocalMappingEntry {
     pub(crate) needle: Authority, // Host part of URL
     #[serde(rename="internal")]
     pub(crate) replace: AuthorityReplacement,
-    pub(crate) allowed: Vec<AppId>
+    pub(crate) allowed: Vec<AppId>,
+    #[serde(default, rename = "forceHttps")]
+    pub(crate) force_https: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

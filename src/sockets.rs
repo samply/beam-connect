@@ -133,6 +133,9 @@ async fn execute_http_task(mut req: Request<Body>, app: &AppId, config: &Config)
     };
     *req.uri_mut() = {
         let mut parts = req.uri().to_owned().into_parts();
+        if target.force_https {
+            parts.scheme = Some(hyper::http::uri::Scheme::HTTPS)
+        }
         parts.authority = Some(target.replace.authority.clone());
         if let Some(path) = target.replace.path {
             parts.path_and_query = Some(PathAndQuery::try_from(&format!("/{path}{}", parts.path_and_query.as_ref().map(PathAndQuery::as_str).unwrap_or(""))).map_err(|e| {
