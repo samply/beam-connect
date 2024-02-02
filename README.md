@@ -87,6 +87,8 @@ A configurable mapping between requested resource and Beam.AppId must be provide
 
 A mishap in communication will be returned as appropriate HTTP replies.
 
+If cascading reverse proxies are placed in front of Beam.Connect, the `Host` header might be overwritten by one of the proxies. In that case, you can set a `X-Replace-Host` header to manually replace the host header within Beam.Connect.
+
 #### Site Discovery
 
 As described in the [command line parameter list](#run-as-an-application), the central cite discovery is fetched from a given URL or local json file. However, to spare the local services from the need to express outward facing connections themselves, Samply.Beam.Connect exports this received information as a local REST endpoint: `GET http://<beam_connect_url>:<beam_connect_port>/sites`. Note, that the information is only fetched at startup and remains static for the program's lifetime.

@@ -26,14 +26,21 @@ pub(crate) async fn handler_http(
         .get(header::HOST)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| Authority::from_str(v).ok());
+    let host_replace_header_auth = req.headers()
+        .get("x-replace-host")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| Authority::from_str(v).ok());
     let authority = https_authority
         .as_ref()
         .or(uri.authority());
+
     if authority.is_none() && uri.path() == "/sites" {
             // Case 1 for sites request: no authority set and /sites
             return respond_with_sites(targets)
     }
-    let authority = authority
+
+    let authority = host_replace_header_auth.as_ref()
+        .or(authority)
         .or(host_header_auth.as_ref());
     let Some(authority) = authority else {
             return Err(StatusCode::BAD_REQUEST.into())
