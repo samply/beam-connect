@@ -143,6 +143,12 @@ case "$1" in
     shift
     start_ci $@
     ;;
+  stop)
+    stop
+    ;;
+  clean)
+    clean
+    ;;
   *)
     start $@
     ;;
