@@ -7,6 +7,7 @@ use reqwest::{Certificate, Client};
 use tokio_native_tls::{TlsAcceptor, native_tls::{self, Identity}};
 use serde::{Serialize, Deserialize};
 use beam_lib::{AppId, set_broker_id};
+use tracing::warn;
 
 use crate::{example_targets, errors::BeamConnectError};
 
@@ -213,7 +214,17 @@ fn build_client(tls_cert_dir: Option<&PathBuf>) -> Result<Client> {
     if let Some(tls_ca_dir) = tls_cert_dir {
         for path_res in tls_ca_dir.read_dir()? {
             if let Ok(path_buf) = path_res {
-                client_builder = client_builder.add_root_certificate(Certificate::from_pem(&fs::read(path_buf.path())?)?);
+                if path_buf.path().is_dir() {
+                    continue;
+                }
+                let cert = match Certificate::from_pem(&fs::read(path_buf.path())?) {
+                    Ok(cert) => cert,
+                    Err(e) => {
+                        warn!("Failed to read cert at {path_buf:?}: {e}");
+                        continue;
+                    },
+                };
+                client_builder = client_builder.add_root_certificate(cert);
             }
         }
     }
