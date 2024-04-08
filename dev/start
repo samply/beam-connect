@@ -32,7 +32,7 @@ export P2="http://localhost:8082" # for scripts
 export VAULT_TOKEN=$(echo $RANDOM | md5sum | head -c 20; echo;)
 
 export ARCH=$(docker version --format "{{.Server.Arch}}")
-export TAG=${TAG:-develop}
+export TAG=${TAG:-develop-sockets}
 
 function image_for_docker() {
      # Pick the correct Ubuntu version for the Docker image,
@@ -50,7 +50,7 @@ function build() {
     BUILD_DOCKER=0
     BACK=$(pwd)
     cd $SD/..
-    CONNECT=./target/debug/connect
+    CONNECT=./target/debug/beam-connect
     if [ ! -x ./artifacts/binaries-$ARCH ]; then
         echo "Binaries missing -- building ..."
         BUILD="$(cargo build $@ --message-format=json)"
@@ -114,7 +114,8 @@ function start_ci {
     pki/pki devsetup
     echo "$VAULT_TOKEN" > ./pki/pki.secret
     build $@
-    docker-compose up --no-build --no-recreate -d
+    docker-compose up --no-recreate -d
+    docker-compose logs -f &
     for ADDR in $P1 $P2; do
         TRIES=1
         while [ $TRIES -ne 0 ]; do
