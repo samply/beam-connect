@@ -127,7 +127,7 @@ async fn execute_http_task(mut req: Request<Body>, app: &AppId, config: &Config)
         warn!("Failed to lookup authority {authority}");
         return Err(StatusCode::BAD_REQUEST);
     };
-    if !target.allowed.contains(&app) {
+    if !target.can_be_accessed_by(&app) {
         warn!("App {app} not authorized to access url {}", req.uri());
         return Err(StatusCode::UNAUTHORIZED);
     };
