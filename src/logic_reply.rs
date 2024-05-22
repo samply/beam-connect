@@ -81,7 +81,7 @@ async fn execute_http_task(task: &TaskRequest<HttpRequest>, config: &Config, cli
             BeamConnectError::CommunicationWithTargetFailed(String::from("Target not defined"))
         })?;
     match &task.from {
-        AppOrProxyId::App(app) if target.allowed.contains(app) => {},
+        AppOrProxyId::App(app) if target.can_be_accessed_by(app) => {},
         id => return Err(BeamConnectError::IdNotAuthorizedToAccessUrl(id.clone(), task_req.url.clone())),
     };
     if task_req.method == Method::CONNECT {

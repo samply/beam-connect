@@ -6,7 +6,7 @@ use hyper::{Uri, http::uri::Authority};
 use reqwest::{Certificate, Client};
 use tokio_native_tls::{TlsAcceptor, native_tls::{self, Identity}};
 use serde::{Serialize, Deserialize};
-use beam_lib::{AppId, set_broker_id};
+use beam_lib::{set_broker_id, AppId, AppOrProxyId};
 use tracing::warn;
 
 use crate::{example_targets, errors::BeamConnectError};
@@ -132,9 +132,18 @@ pub(crate) struct LocalMappingEntry {
     pub(crate) needle: Authority, // Host part of URL
     #[serde(rename="internal")]
     pub(crate) replace: AuthorityReplacement,
-    pub(crate) allowed: Vec<AppId>,
+    pub(crate) allowed: Vec<AppOrProxyId>,
     #[serde(default, rename = "forceHttps")]
     pub(crate) force_https: bool,
+}
+
+impl LocalMappingEntry {
+    pub fn can_be_accessed_by(&self, who: &AppId) -> bool {
+        self.allowed.iter().any(|id| match id {
+            AppOrProxyId::App(app) => app == who,
+            AppOrProxyId::Proxy(proxy) => who.as_ref().ends_with(proxy.as_ref()),
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -274,6 +283,7 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use beam_lib::set_broker_id;
+    use beam_lib::AppId;
 
     use super::CentralMapping;
     use super::LocalMapping;
@@ -331,11 +341,12 @@ mod tests {
             {"external": "ifconfig.me","internal":"ifconfig.me/asdf","allowed":["connect1.proxy23.broker.ccp-it.dktk.dkfz.de","connect2.proxy23.broker.ccp-it.dktk.dkfz.de"]},
             {"external": "ip-api.com","internal":"ip-api.com","allowed":["connect1.proxy23.broker.ccp-it.dktk.dkfz.de","connect2.proxy23.broker.ccp-it.dktk.dkfz.de"]},
             {"external": "wttr.in","internal":"wttr.in","allowed":["connect1.proxy23.broker.ccp-it.dktk.dkfz.de","connect2.proxy23.broker.ccp-it.dktk.dkfz.de"]},
-            {"external": "node23.uk12.network","internal":"host23.internal.network","allowed":["connect1.proxy23.broker.ccp-it.dktk.dkfz.de","connect2.proxy23.broker.ccp-it.dktk.dkfz.de"]}
+            {"external": "node23.uk12.network","internal":"host23.internal.network","allowed":["proxy23.broker.ccp-it.dktk.dkfz.de"]}
         ]"#;
         let obj: LocalMapping = LocalMapping{entries:serde_json::from_str(serialized).unwrap()};
         let expect = example_local(&broker_id);
         assert_eq!(obj.entries.len(), expect.entries.len());
+        assert!(obj.get(&hyper::http::uri::Authority::from_static("node23.uk12.network")).unwrap().can_be_accessed_by(&AppId::new("foobar.proxy23.broker.ccp-it.dktk.dkfz.de").unwrap()));
 
         for (entry,ref_entry) in obj.entries.iter().zip(expect.entries.iter()) {
             assert_eq!(entry.needle,ref_entry.needle);
