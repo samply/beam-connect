@@ -5,7 +5,7 @@ ARG IMGNAME=gcr.io/distroless/cc
 FROM alpine AS chmodder
 ARG FEATURE
 ARG TARGETARCH
-COPY /artifacts/binaries-$TARGETARCH$FEATURE/connect /app/
+COPY /artifacts/binaries-$TARGETARCH$FEATURE/$COMPONENT /app/
 RUN chmod +x /app/*
 
 # FROM ${IMGNAME}
@@ -19,6 +19,6 @@ ARG TARGETARCH
 #COPY /artifacts/binaries-$TARGETARCH/$COMPONENT /usr/local/bin/
 COPY --from=chmodder /app/* /usr/local/bin/
 #ENTRYPOINT [ "/usr/local/bin/$COMPONENT" ]
-ENTRYPOINT [ "/usr/local/bin/connect" ]
+ENTRYPOINT [ "/usr/local/bin/beam-connect" ]
 # ENTRYPOINT ["tail", "-f", "/dev/null"]
 

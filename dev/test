@@ -1,0 +1,25 @@
+#!/bin/bash -e
+
+SD=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+
+cd $SD
+
+
+case "$1" in
+  ci)
+    ./start $@
+    shift
+    for testbin in $SD/../testbinaries/*; do
+      chmod +x $testbin
+      $testbin
+    done
+    ;;
+  noci)
+    shift
+    cargo test $@
+    ;;
+  *)
+    echo "Usage: $0 noci|ci"
+    exit 1
+    ;;
+esac

@@ -32,7 +32,7 @@ export P2="http://localhost:8082" # for scripts
 export VAULT_TOKEN=$(echo $RANDOM | md5sum | head -c 20; echo;)
 
 export ARCH=$(docker version --format "{{.Server.Arch}}")
-export TAG=${TAG:-develop}
+export TAG=${TAG:-develop-sockets}
 
 function image_for_docker() {
      # Pick the correct Ubuntu version for the Docker image,
@@ -136,6 +136,7 @@ function start_ci {
         done
     done
     echo "Services are up!"
+    sleep 5
 }
 
 case "$1" in
