@@ -1,7 +1,10 @@
 use std::{time::Duration, collections::HashSet, sync::Arc, convert::Infallible};
 
-use hyper::{header, Request, Body, StatusCode, upgrade::OnUpgrade, http::{HeaderValue, uri::PathAndQuery}, client::conn::Builder, server::conn::Http, service::service_fn, Uri};
-use tokio::{io::AsyncWriteExt, net::TcpStream};
+use futures_util::TryStreamExt;
+use http_body_util::{combinators::BoxBody, BodyExt, BodyStream, StreamBody};
+use hyper::{body::Incoming, header, http::{uri::PathAndQuery, HeaderValue}, service::service_fn, upgrade::OnUpgrade, Request, StatusCode, Uri};
+use hyper_util::rt::{TokioExecutor, TokioIo};
+use tokio::{io::AsyncWriteExt, task::JoinHandle};
 use tracing::{error, warn, debug, info};
 use beam_lib::{SocketTask, MsgId, AppId, AppOrProxyId};
 use reqwest::Response;
@@ -9,7 +12,7 @@ use reqwest::Response;
 use crate::{config::Config, errors::BeamConnectError, structs::MyStatusCode};
 
 
-pub(crate) fn spawn_socket_task_poller(config: Config) {
+pub(crate) fn spawn_socket_task_poller(config: Config) -> JoinHandle<()> {
     tokio::spawn(async move {
         use BeamConnectError::*;
         let mut seen: HashSet<MsgId> = HashSet::new();
@@ -49,7 +52,7 @@ pub(crate) fn spawn_socket_task_poller(config: Config) {
                 });
             }
         }
-    });
+    })
 }
 
 async fn poll_socket_task(config: &Config) -> Result<Vec<SocketTask>, BeamConnectError> {
@@ -89,7 +92,7 @@ async fn connect_proxy(task_id: &MsgId, config: &Config) -> Result<Response, Bea
     Err(BeamConnectError::ProxyOtherError(invalid_status_reason))
 }
 
-fn status_to_response(status: StatusCode) -> hyper::Response<Body> {
+fn status_to_response(status: StatusCode) -> crate::Response {
     let mut res = hyper::Response::default();
     *res.status_mut() = status;
     res
@@ -103,17 +106,14 @@ async fn tunnel(proxy: Response, client: AppId, config: &Config) {
             return;
         },
     };
-    let http_err = Http::new()
-        .http1_only(true)
-        .http1_keep_alive(true)
-        .serve_connection(proxy, service_fn(move |req| {
+    let http_err = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+        .serve_connection_with_upgrades(TokioIo::new(proxy), service_fn(move |req| {
             let client2 = client.clone();
             let config2 = config.clone();
             async move {
                 Ok::<_, Infallible>(execute_http_task(req, &client2, &config2).await.unwrap_or_else(status_to_response))
             }
         }))
-        .with_upgrades()
         .await;
 
     if let Err(e) = http_err {
@@ -121,7 +121,7 @@ async fn tunnel(proxy: Response, client: AppId, config: &Config) {
     }
 }
 
-async fn execute_http_task(mut req: Request<Body>, app: &AppId, config: &Config) -> Result<hyper::Response<Body>, StatusCode> {
+async fn execute_http_task(mut req: Request<Incoming>, app: &AppId, config: &Config) -> Result<crate::Response, StatusCode> {
     let authority = req.uri().authority().expect("Authority is always set by the requesting beam-connect");
     let Some(target) = config.targets_local.get(authority) else {
         warn!("Failed to lookup authority {authority}");
@@ -156,7 +156,7 @@ async fn execute_http_task(mut req: Request<Body>, app: &AppId, config: &Config)
     };
 
     let mut resp = config.client
-        .execute(req.try_into().expect("This should always convert"))
+        .execute(req.map(|b| reqwest::Body::wrap_stream(BodyStream::new(b).map_ok(|v| v.into_data().expect("TODO: How to handle trailers?")))).try_into().expect("This should always convert"))
         .await
         .map_err(|e| {
             warn!("Error executuing http task. Failed handshake with server: {e}");
@@ -170,25 +170,29 @@ async fn execute_http_task(mut req: Request<Body>, app: &AppId, config: &Config)
 }
 
 // TODO: Make a PR to add into_parts for reqwest::Response or even a conversion trait impl to avoid clones
-fn convert_to_hyper_response(resp: Response) -> hyper::Response<Body> {
+fn convert_to_hyper_response(resp: Response) -> crate::Response {
     let mut builder = hyper::http::response::Builder::new()
         .status(resp.status())
         .version(resp.version());
     builder.headers_mut().map(|headers| *headers = resp.headers().clone());
-    builder.body(hyper::Body::wrap_stream(resp.bytes_stream())).expect("This should always convert")
+    let stream = resp
+        .bytes_stream()
+        .map_ok(hyper::body::Frame::data)
+        .map_err(Into::into);
+    builder.body(BoxBody::new(StreamBody::new(stream))).expect("This should always convert")
 }
 
 fn tunnel_upgrade(client: Option<OnUpgrade>, server: Option<OnUpgrade>) {
     if let (Some(client), Some(proxy)) = (client, server) {
         tokio::spawn(async move {
-            let (mut client, mut proxy) = match tokio::try_join!(client, proxy) {
+            let (client, proxy) = match tokio::try_join!(client, proxy) {
                 Err(e) => {
                     warn!("Upgrading connection between client and beam-connect failed: {e}");
                     return;
                 },
                 Ok(sockets) => sockets
             };
-            let result = tokio::io::copy_bidirectional(&mut client, &mut proxy).await;
+            let result = tokio::io::copy_bidirectional(&mut TokioIo::new(client), &mut TokioIo::new(proxy)).await;
             if let Err(e) = result {
                 debug!("Relaying socket connection ended: {e}");
             }
@@ -196,7 +200,7 @@ fn tunnel_upgrade(client: Option<OnUpgrade>, server: Option<OnUpgrade>) {
     }
 }
 
-pub(crate) async fn handle_via_sockets(mut req: Request<Body>, config: &Arc<Config>, target: &AppId, auth: HeaderValue) -> Result<hyper::Response<Body>, MyStatusCode> {
+pub(crate) async fn handle_via_sockets(mut req: Request<Incoming>, config: &Arc<Config>, target: &AppId, auth: HeaderValue) -> Result<crate::Response, MyStatusCode> {
     let resp = config.client
         .post(format!("{}v1/sockets/{target}", config.proxy_url))
         .header(header::AUTHORIZATION, auth)
@@ -216,10 +220,10 @@ pub(crate) async fn handle_via_sockets(mut req: Request<Body>, config: &Arc<Conf
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    let (mut sender, proxy_conn) = Builder::new()
-        .http1_preserve_header_case(true)
-        .http1_title_case_headers(true)
-        .handshake(proxy_socket)
+    let (mut sender, proxy_conn) = hyper::client::conn::http1::Builder::new()
+        .preserve_header_case(true)
+        .title_case_headers(true)
+        .handshake(TokioIo::new(proxy_socket))
         .await
         .map_err(|e| {
             warn!("Error doing handshake with proxy: {e}");
@@ -236,16 +240,17 @@ pub(crate) async fn handle_via_sockets(mut req: Request<Body>, config: &Arc<Conf
         match proxy_connection {
             Ok(mut proxy_io) => {
                 tokio::spawn(async move {
-                    let Ok(mut client) = upgrade.await else {
+                    let Ok(client) = upgrade.await else {
                         warn!("Failed to upgrade client connection");
                         return;
                     };
+                    let mut client = TokioIo::new(client);
                     if !proxy_io.read_buf.is_empty() {
                         if let Err(e) = client.write_all_buf(&mut proxy_io.read_buf).await {
                             warn!("Failed to send initial bytes from remote to client: {e}");
                         }
                     }
-                    if let Err(e) = tokio::io::copy_bidirectional(&mut client, &mut proxy_io.io).await {
+                    if let Err(e) = tokio::io::copy_bidirectional(&mut client, &mut TokioIo::new(proxy_io.io)).await {
                         debug!("Error relaying connection from client to proxy: {e}");
                     }
                 });
@@ -263,5 +268,5 @@ pub(crate) async fn handle_via_sockets(mut req: Request<Body>, config: &Arc<Conf
         warn!("Failed to send request to proxy: {e}");
         StatusCode::BAD_GATEWAY
     })?;
-    Ok(resp)
+    Ok(resp.map(|b| BoxBody::new(b.map_err(Into::into))))
 }

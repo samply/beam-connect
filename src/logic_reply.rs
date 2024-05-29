@@ -1,5 +1,5 @@
 use beam_lib::{TaskRequest, TaskResult, WorkStatus, AppOrProxyId};
-use hyper::{header, StatusCode, body, Uri, Method, http::uri::PathAndQuery};
+use hyper::{header, StatusCode, Uri, Method, http::uri::PathAndQuery};
 use tracing::{info, warn, debug};
 use serde_json::Value;
 use reqwest::{Client, Response};
@@ -110,7 +110,7 @@ async fn execute_http_task(task: &TaskRequest<HttpRequest>, config: &Config, cli
     let resp = client
         .request(task_req.method.clone(), uri.to_string())
         .headers(task_req.headers.clone())
-        .body(body::Body::from(task_req.body.clone()))
+        .body(task_req.body.to_vec())
         .send()
         .await
         .map_err(|e| BeamConnectError::CommunicationWithTargetFailed(e.to_string()))?;

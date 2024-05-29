@@ -1,22 +1,26 @@
 use std::{sync::Arc, str::FromStr};
+use http_body_util::combinators::BoxBody;
+use http_body_util::{BodyExt, Full};
+use hyper::body::{Bytes, Incoming};
 use hyper::http::HeaderValue;
 use hyper::http::uri::{Authority, Scheme};
-use hyper::{Request, Body, Response, header, StatusCode, body, Uri};
+use hyper::{Request, header, StatusCode, Uri};
 use tracing::{info, debug, warn, error};
 use serde_json::Value;
 use beam_lib::{AppId, TaskResult, TaskRequest, WorkStatus, FailureStrategy, MsgId};
 
 use crate::config::CentralMapping;
+use crate::Response;
 use crate::{config::Config, structs::MyStatusCode, msg::{HttpRequest, HttpResponse}};
 
 /// GET   http://some.internal.system?a=b&c=d
 /// Host: <identical>
 /// This function knows from its map which app to direct the message to 
 pub(crate) async fn handler_http(
-    mut req: Request<Body>,
+    mut req: Request<Incoming>,
     config: Arc<Config>,
     https_authority: Option<Authority>,
-) -> Result<Response<Body>, MyStatusCode> {
+) -> Result<Response, MyStatusCode> {
 
     let targets = &config.targets_public;
     let method = req.method().to_owned();
@@ -96,7 +100,7 @@ pub(crate) async fn handler_http(
     return handle_via_tasks(req, &config, target, auth).await;
 }
 
-async fn handle_via_tasks(req: Request<Body>, config: &Arc<Config>, target: &AppId, auth: HeaderValue) -> Result<Response<Body>, MyStatusCode> {
+async fn handle_via_tasks(req: Request<Incoming>, config: &Arc<Config>, target: &AppId, auth: HeaderValue) -> Result<Response, MyStatusCode> {
     let msg = http_req_to_struct(req, &config.my_app_id, &target, config.expire).await?;
 
     // Send to Proxy
@@ -188,17 +192,17 @@ async fn handle_via_tasks(req: Request<Body>, config: &Arc<Config>, target: &App
         .status(response_inner.status);
     *resp.headers_mut().unwrap() = response_inner.headers;
     let resp = resp
-        .body(body::Body::from(response_inner.body))
+        .body(BoxBody::new(Full::new(Bytes::from(response_inner.body)).map_err(Into::into)))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(resp)
 }
 
-async fn http_req_to_struct(req: Request<Body>, my_id: &AppId, target_id: &AppId, expire: u64) -> Result<TaskRequest<HttpRequest>, MyStatusCode> {
+async fn http_req_to_struct(mut req: Request<Incoming>, my_id: &AppId, target_id: &AppId, expire: u64) -> Result<TaskRequest<HttpRequest>, MyStatusCode> {
     let method = req.method().clone();
     let url = req.uri().clone();
     let headers = req.headers().clone();
-    let body = body::to_bytes(req).await
+    let body = req.body_mut().collect().await
         .map_err(|e| {
             warn!("Failed to read body: {e}");
             StatusCode::BAD_REQUEST
@@ -208,7 +212,7 @@ async fn http_req_to_struct(req: Request<Body>, my_id: &AppId, target_id: &AppId
         method,
         url,
         headers,
-        body: body.to_vec(),
+        body: body.to_bytes().to_vec(),
     };
     let msg = TaskRequest {
         from: my_id.clone().into(),
@@ -225,12 +229,12 @@ async fn http_req_to_struct(req: Request<Body>, my_id: &AppId, target_id: &AppId
 
 /// If the authority is empty (e.g. if localhost is used) or the authoroty is not in the routing
 /// table AND the path is /sites, return global routing table
-fn respond_with_sites(targets: &CentralMapping) -> Result<Response<Body>, MyStatusCode> {
+fn respond_with_sites(targets: &CentralMapping) -> Result<Response, MyStatusCode> {
     debug!("Central Site Discovery requested");
-    let body = body::Body::from(serde_json::to_string(targets)?);
+    let body = Full::new(serde_json::to_vec(targets)?.into());
     let response = Response::builder()
         .status(200)
-        .body(body)
+        .body(BoxBody::new(body.map_err(Into::into)))
         .unwrap();
     Ok(response)
 }
