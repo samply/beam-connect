@@ -1,9 +1,12 @@
-use std::{net::SocketAddr, str::FromStr, convert::Infallible, error::Error, sync::Arc, time::Duration};
+use std::{convert::Infallible, sync::Arc, time::Duration};
 
 use config::Config;
-use hyper::{body, Body, service::{service_fn, make_service_fn}, Request, Response, Server, server::conn::{AddrStream, Http}, Method};
+use http_body_util::combinators::BoxBody;
+use hyper::{body::{Bytes, Incoming}, service::service_fn, Method, Request};
+use hyper_util::{rt::{TokioExecutor, TokioIo}, server};
 use logic_ask::handler_http;
-use tracing::{info, debug, warn};
+use tokio::{net::TcpListener, task::JoinHandle};
+use tracing::{debug, error, info, warn};
 use tracing_subscriber::{EnvFilter, filter::LevelFilter};
 
 use crate::errors::BeamConnectError;
@@ -21,12 +24,11 @@ mod banner;
 mod sockets;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>>{
+async fn main() -> anyhow::Result<()> {
     tracing::subscriber::set_global_default(tracing_subscriber::fmt().with_env_filter(EnvFilter::builder().with_default_directive(LevelFilter::INFO.into()).from_env_lossy()).finish())?;
     banner::print_banner();
     let config = Config::load().await?;
     let config2 = config.clone();
-    let listen = SocketAddr::from_str(&config2.bind_addr).unwrap();
     let client = config.client.clone();
     let client2 = client.clone();
     banner::print_startup_app_config(&config);
@@ -54,56 +56,107 @@ async fn main() -> Result<(), Box<dyn Error>>{
             }
         }
     });
+    #[allow(unused_mut)]
+    let mut executers = vec![http_executor];
     #[cfg(feature = "sockets")]
-    sockets::spawn_socket_task_poller(config.clone());
+    executers.push(sockets::spawn_socket_task_poller(config.clone()));
 
     let config = Arc::new(config.clone());
 
-    let make_service = make_service_fn(|_conn: &AddrStream| {
-        // let remote_addr = conn.remote_addr();
-        let config = config.clone();
-        async {
-            Ok::<_, Infallible>(service_fn(move |req|
-                handler_http_wrapper(req, config.clone())))
-        }
-    });
-
-    let server = Server::bind(&listen)
-        .serve(make_service)
-        .with_graceful_shutdown(crate::shutdown::wait_for_signal());
-
-    if let Err(e) = server.await {
-        eprintln!("server error: {}", e);
+    if let Err(e) = server(&config).await {
+        error!("Server error: {}", e);
     }
-    info!("(2/2) Shutting down gracefully ...");
-    http_executor.abort();
+    info!("Shutting down...");
+    executers.iter().for_each(JoinHandle::abort);
     Ok(())
 }
 
+// See https://github.com/hyperium/hyper-util/blob/master/examples/server_graceful.rs
+async fn server(config: &Arc<Config>) -> anyhow::Result<()> {
+    let listener = TcpListener::bind(config.bind_addr.clone()).await?;
+
+    let server = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
+    let graceful = hyper_util::server::graceful::GracefulShutdown::new();
+    let mut ctrl_c = std::pin::pin!(crate::shutdown::wait_for_signal());
+
+    loop {
+        tokio::select! {
+            conn = listener.accept() => {
+                let (stream, peer_addr) = match conn {
+                    Ok(conn) => conn,
+                    Err(e) => {
+                        warn!("accept error: {}", e);
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                        continue;
+                    }
+                };
+                debug!("incomming connection accepted: {}", peer_addr);
+
+                let stream = hyper_util::rt::TokioIo::new(stream);
+
+                let config = config.clone();
+                let conn = server.serve_connection_with_upgrades(stream, service_fn(move |req| {
+                    let config = config.clone();
+                    async move {
+                        handler_http_wrapper(req, config).await
+                }}));
+
+                let conn = graceful.watch(conn.into_owned());
+
+                tokio::spawn(async move {
+                    if let Err(err) = conn.await {
+                        warn!("connection error: {}", err);
+                    }
+                    debug!("Connection dropped: {}", peer_addr);
+                });
+            },
+
+            _ = ctrl_c.as_mut() => {
+                drop(listener);
+                info!("Ctrl-C received, starting shutdown");
+                break;
+            }
+        }
+    }
+
+    tokio::select! {
+        _ = graceful.shutdown() => {
+            info!("Gracefully shutdown!");
+        },
+        _ = tokio::time::sleep(Duration::from_secs(5)) => {
+            warn!("Waited 5 seconds for graceful shutdown, aborting...");
+        }
+    }
+
+    Ok(())
+}
+
+pub type Response<T = BoxBody<Bytes, anyhow::Error>> = hyper::Response<T>;
+
 pub(crate) async fn handler_http_wrapper(
-    req: Request<Body>,
+    req: Request<Incoming>,
     config: Arc<Config>,
-) -> Result<Response<Body>, Infallible> {
+) -> Result<Response, Infallible> {
     // On https connections we want to emulate that we successfully connected to get the actual http request
     if req.method() == Method::CONNECT {
         tokio::spawn(async move {
             let authority = req.uri().authority().cloned();
             match hyper::upgrade::on(req).await {
                 Ok(connection) => {
-                    let tls_connection = match config.tls_acceptor.accept(connection).await {
+                    let tls_connection = match config.tls_acceptor.accept(TokioIo::new(connection)).await {
                         Err(e) => {
                             warn!("Error accepting tls connection: {e}");
                             return;
                         },
                         Ok(s) => s,
                     };
-                    Http::new().serve_connection(tls_connection, service_fn(|req| {
+                    server::conn::auto::Builder::new(TokioExecutor::new()).serve_connection_with_upgrades(TokioIo::new(tls_connection), service_fn(|req| {
                         let config = config.clone();
                         let authority = authority.clone();
                         async move {
                             match handler_http(req, config, authority).await {
                                 Ok(e) => Ok::<_, Infallible>(e),
-                                Err(e) => Ok(Response::builder().status(e.code).body(body::Body::empty()).unwrap()),
+                                Err(e) => Ok(Response::builder().status(e.code).body(BoxBody::default()).unwrap()),
                             }
                         }
                     })).await.unwrap_or_else(|e| warn!("Failed to handle upgraded connection: {e}"));
@@ -111,11 +164,11 @@ pub(crate) async fn handler_http_wrapper(
                 Err(e) => warn!("Failed to upgrade connection: {e}"),
             };
         });
-        Ok(Response::new(Body::empty()))
+        Ok(Response::new(BoxBody::default()))
     } else {
         match handler_http(req, config, None).await {
             Ok(e) => Ok(e),
-            Err(e) => Ok(Response::builder().status(e.code).body(body::Body::empty()).unwrap()),
+            Err(e) => Ok(Response::builder().status(e.code).body(BoxBody::default()).unwrap()),
         }
     }
 
