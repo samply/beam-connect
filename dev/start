@@ -50,7 +50,7 @@ function build() {
     BUILD_DOCKER=0
     BACK=$(pwd)
     cd $SD/..
-    CONNECT=./target/debug/connect
+    CONNECT=./target/debug/beam-connect
     if [ ! -x ./artifacts/binaries-$ARCH ]; then
         echo "Binaries missing -- building ..."
         BUILD="$(cargo build $@ --message-format=json)"
@@ -115,11 +115,12 @@ function start_ci {
     echo "$VAULT_TOKEN" > ./pki/pki.secret
     build $@
     docker-compose up --no-build --no-recreate -d
-    for ADDR in $P1 $P2; do
+    echo_server_ip=$(docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 'my.example.com')
+    for ADDR in $P1 $P2 "https://$echo_server_ip"; do
         TRIES=1
         while [ $TRIES -ne 0 ]; do
             set +e
-            CODE=$(curl -s -o /tmp/body -w '%{response_code}' $ADDR/v1/health)
+            CODE=$(curl -k -s -o /tmp/body -w '%{response_code}' $ADDR/v1/health)
             set -e
             if [ "$CODE" == "200" ]; then
                 TRIES=0
@@ -136,7 +137,6 @@ function start_ci {
         done
     done
     echo "Services are up!"
-    sleep 5
 }
 
 case "$1" in

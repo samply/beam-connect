@@ -5,7 +5,7 @@ use hyper::body::{Bytes, Incoming};
 use hyper::http::HeaderValue;
 use hyper::http::uri::{Authority, Scheme};
 use hyper::{Request, header, StatusCode, Uri};
-use tracing::{info, debug, warn, error};
+use tracing::{debug, error, info, info_span, warn, Instrument};
 use serde_json::Value;
 use beam_lib::{AppId, TaskResult, TaskRequest, WorkStatus, FailureStrategy, MsgId};
 
@@ -78,7 +78,6 @@ pub(crate) async fn handler_http(
             }
         };
 
-    info!("{method} {uri} via {target}");
 
     // Set the right authority as it might have been passed by the caller because it was a CONNECT request
     *req.uri_mut() = {
@@ -94,10 +93,12 @@ pub(crate) async fn handler_http(
             StatusCode::INTERNAL_SERVER_ERROR
         })?
     };
+    info!("{method} {} via {target}", req.uri());
+    let span = info_span!("request", %method, via = %target, url = %req.uri());
     #[cfg(feature = "sockets")]
-    return crate::sockets::handle_via_sockets(req, &config, target, auth).await;
+    return crate::sockets::handle_via_sockets(req, &config, target, auth).instrument(span).await;
     #[cfg(not(feature = "sockets"))]
-    return handle_via_tasks(req, &config, target, auth).await;
+    return handle_via_tasks(req, &config, target, auth).instrument(span).await;
 }
 
 async fn handle_via_tasks(req: Request<Incoming>, config: &Arc<Config>, target: &AppId, auth: HeaderValue) -> Result<Response, MyStatusCode> {

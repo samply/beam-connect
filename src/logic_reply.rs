@@ -1,6 +1,6 @@
 use beam_lib::{TaskRequest, TaskResult, WorkStatus, AppOrProxyId};
 use hyper::{header, StatusCode, Uri, Method, http::uri::PathAndQuery};
-use tracing::{info, warn, debug};
+use tracing::{debug, field, info, info_span, warn, Instrument, Span};
 use serde_json::Value;
 use reqwest::{Client, Response};
 
@@ -11,10 +11,12 @@ pub(crate) async fn process_requests(config: Config, client: Client) -> Result<(
     let msgs = fetch_requests(&config, &client).await?;
 
     for task in msgs {
-        // If we fail to execute the http task we should report this as a failure to beam
-        let resp = execute_http_task(&task, &config, &client).await;
+        async {
+            // If we fail to execute the http task we should report this as a failure to beam
+            let resp = execute_http_task(&task, &config, &client).await;
 
-        send_reply(&task, &config, &client, resp).await?;
+            send_reply(&task, &config, &client, resp).await
+        }.instrument(info_span!("task",from = %task.from.hide_broker(), method = field::Empty, orig_url = field::Empty, dst_url = field::Empty)).await?;
     }
 
     Ok(())
@@ -72,7 +74,9 @@ async fn send_reply(task: &TaskRequest<HttpRequest>, config: &Config, client: &C
 // TODO: Take ownership of `task` to save clones
 async fn execute_http_task(task: &TaskRequest<HttpRequest>, config: &Config, client: &Client) -> Result<Response, BeamConnectError> {
     let task_req = &task.body;
-    info!("{} | {} {}", task.from, task_req.method, task_req.url);
+    let span = Span::current();
+    span.record("method", field::display(&task_req.method));
+    span.record("orig_url", field::display(&task_req.url));
     let target = config
         .targets_local
         .get(task_req.url.authority().unwrap()) //TODO unwrap
@@ -106,7 +110,8 @@ async fn execute_http_task(task: &TaskRequest<HttpRequest>, config: &Config, cli
         .authority(target.replace.authority.to_owned())
         .build()?;
 
-    info!("Rewritten to: {} {}", task_req.method, uri);
+    span.record("dst_url", field::display(&uri));
+    info!("Executing");
     let resp = client
         .request(task_req.method.clone(), uri.to_string())
         .headers(task_req.headers.clone())

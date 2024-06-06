@@ -97,9 +97,8 @@ async fn server(config: &Arc<Config>) -> anyhow::Result<()> {
                 let config = config.clone();
                 let conn = server.serve_connection_with_upgrades(stream, service_fn(move |req| {
                     let config = config.clone();
-                    async move {
-                        handler_http_wrapper(req, config).await
-                }}));
+                    handler_http_wrapper(req, config)
+                }));
 
                 let conn = graceful.watch(conn.into_owned());
 

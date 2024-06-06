@@ -5,7 +5,7 @@ ARG IMGNAME=gcr.io/distroless/cc
 FROM alpine AS chmodder
 ARG FEATURE
 ARG TARGETARCH
-COPY /artifacts/binaries-$TARGETARCH$FEATURE/$COMPONENT /app/
+COPY /artifacts/binaries-$TARGETARCH$FEATURE/beam-connect /app/
 RUN chmod +x /app/*
 
 # FROM ${IMGNAME}
