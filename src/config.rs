@@ -135,6 +135,8 @@ pub(crate) struct LocalMappingEntry {
     pub(crate) allowed: Vec<AppOrProxyId>,
     #[serde(default, rename = "forceHttps")]
     pub(crate) force_https: bool,
+    #[serde(default, rename = "resetHost")]
+    pub(crate) reset_host: bool,
 }
 
 impl LocalMappingEntry {

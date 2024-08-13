@@ -82,9 +82,9 @@ function build_docker() {
     BACK2=$(pwd)
     cd $SD
     if [ -z "$IMGNAME" ]; then
-        docker-compose build --build-arg TARGETARCH=$ARCH
+        docker compose build --build-arg TARGETARCH=$ARCH
     else
-        docker-compose build --build-arg TARGETARCH=$ARCH --build-arg IMGNAME=$IMGNAME
+        docker compose build --build-arg TARGETARCH=$ARCH --build-arg IMGNAME=$IMGNAME
     fi
     cd $BACK2
 }
@@ -95,7 +95,7 @@ function clean() {
 }
 
 function stop {
-    docker-compose down
+    docker compose down
     rm -fv pki/*.pem pki/*.json pki/pki.secret
     pki/pki clean
 }
@@ -105,7 +105,7 @@ function start {
     pki/pki devsetup
     echo "$VAULT_TOKEN" > ./pki/pki.secret
     build $@
-    docker-compose up --no-build --no-recreate --abort-on-container-exit
+    docker compose up --no-build --no-recreate --abort-on-container-exit
 }
 
 function start_ci {
@@ -114,7 +114,7 @@ function start_ci {
     pki/pki devsetup
     echo "$VAULT_TOKEN" > ./pki/pki.secret
     build $@
-    docker-compose up --no-build --no-recreate -d
+    docker compose up --no-build --no-recreate -d
     echo_server_ip=$(docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 'my.example.com')
     for ADDR in $P1 $P2 "https://$echo_server_ip"; do
         TRIES=1
@@ -130,7 +130,7 @@ function start_ci {
                 ((TRIES=TRIES+1))
                 if [ $TRIES -ge 30 ]; then
                     echo "ERROR: $ADDR not available after 30 seconds. Giving up and printing docker compose logs."
-                    docker-compose logs
+                    docker compose logs
                     exit 5
                 fi
             fi

@@ -16,7 +16,8 @@ pub(crate) fn example_local(broker_id: &str) -> LocalMapping {
         needle: Authority::from_static(needle),
         replace: serde_json::from_value(serde_json::Value::String(replace.to_owned())).unwrap(),
         allowed,
-        force_https: false
+        force_https: false,
+        reset_host: false,
     })
     .into_iter()
     .collect()};
