@@ -111,10 +111,18 @@ async fn execute_http_task(task: &TaskRequest<HttpRequest>, config: &Config, cli
         .build()?;
 
     span.record("dst_url", field::display(&uri));
+    let mut headers = task_req.headers.clone();
+    if target.reset_host {
+        // This will lead to reqwest generating a new HOST header coresponding to the new hostname of the url.
+        // If we don't do this it can lead to problems with reverse proxies because
+        // they will look at the old HOST header (the virtual host) in order to route the request.
+        tracing::trace!("Resetting host header");
+        headers.remove(header::HOST);
+    }
     info!("Executing");
     let resp = client
         .request(task_req.method.clone(), uri.to_string())
-        .headers(task_req.headers.clone())
+        .headers(headers)
         .body(task_req.body.to_vec())
         .send()
         .await
