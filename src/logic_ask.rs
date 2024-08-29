@@ -116,21 +116,8 @@ async fn handle_via_tasks(req: Request<Incoming>, config: &Arc<Config>, target: 
         return Err(StatusCode::BAD_GATEWAY.into());
     }
 
-    // Fetch Task ID
-    let location = resp.headers().get(header::LOCATION)
-        .and_then(|loc| loc.to_str().ok())
-        .and_then(|loc| Uri::from_str(loc).ok())
-        .ok_or(StatusCode::BAD_GATEWAY)?;
-
-    // Ask Proxy for MsgResult
-    let results_uri = Uri::builder()
-        .scheme(config.proxy_url.scheme().unwrap().as_str())
-        .authority(config.proxy_url.authority().unwrap().to_owned())
-        .path_and_query(format!("{}/results?wait_count=1&wait_timeout=10000", location.path()))
-        .build().unwrap(); // TODO
-    debug!("Fetching reply from Proxy: {results_uri}");
     let resp = config.client
-        .get(results_uri.to_string())
+        .get(format!("{}v1/tasks/{}/results?wait_count=1&wait_timeout=10000", config.proxy_url, msg.id))
         .header(header::AUTHORIZATION, auth)
         .header(header::ACCEPT, "application/json")
         .send()
