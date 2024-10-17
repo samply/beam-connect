@@ -5,7 +5,7 @@ use http_body_util::combinators::BoxBody;
 use hyper::{body::{Bytes, Incoming}, service::service_fn, Method, Request};
 use hyper_util::{rt::{TokioExecutor, TokioIo}, server};
 use logic_ask::handler_http;
-use tokio::{net::TcpListener, task::JoinHandle};
+use tokio::{net::TcpListener, task::JoinHandle, time::Instant};
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::{EnvFilter, filter::LevelFilter};
 
@@ -38,6 +38,8 @@ async fn main() -> anyhow::Result<()> {
 
 
     let http_executor = tokio::task::spawn(async move {
+        let mut tries = 0_u32;
+        let mut timer= std::pin::pin!(tokio::time::sleep(Duration::from_secs(60)));
         loop {
             debug!("Waiting for next request ...");
             if let Err(e) = logic_reply::process_requests(config2.clone(), client2.clone()).await {
@@ -45,14 +47,24 @@ async fn main() -> anyhow::Result<()> {
                     BeamConnectError::ProxyTimeoutError => {
                         debug!("{e}");
                     },
-                    BeamConnectError::ProxyReqwestError(e) => {
-                        warn!("Error reaching beam proxy: {e}");
-                        tokio::time::sleep(Duration::from_secs(10)).await;
+                    BeamConnectError::ProxyRejectedAuthorization => {
+                        error!("Stopping task polling: {e}");
+                        break
                     }
-                    _ => {
+                    _ if tries < 10 => {
+                        tries += 1;
                         warn!("Error in processing request: {e}. Will continue with the next one.");
+                    },
+                    _ => {
+                        tries += 1;
+                        warn!("Failed to process requests: {e}. Retrying in 30s.");
+                        tokio::time::sleep(Duration::from_secs(30)).await;
                     }
                 }
+            }
+            if timer.is_elapsed() {
+                tries = tries.saturating_sub(2);
+                timer.as_mut().reset(Instant::now() + Duration::from_secs(60));
             }
         }
     });
