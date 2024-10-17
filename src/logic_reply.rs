@@ -144,6 +144,7 @@ async fn fetch_requests(config: &Config, client: &Client) -> Result<Vec<TaskRequ
             info!("Got request: {:?}", resp);
         },
         StatusCode::GATEWAY_TIMEOUT => return Err(BeamConnectError::ProxyTimeoutError),
+        StatusCode::UNAUTHORIZED => return Err(BeamConnectError::ProxyRejectedAuthorization),
         _ => {
             return Err(BeamConnectError::ProxyOtherError(format!("Got response code {}", resp.status())));
         }
