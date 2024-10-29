@@ -5,7 +5,7 @@ use hyper::body::{Bytes, Incoming};
 use hyper::http::HeaderValue;
 use hyper::http::uri::{Authority, Scheme};
 use hyper::{Request, header, StatusCode, Uri};
-use tracing::{debug, error, info, info_span, warn, Instrument};
+use tracing::{debug, error, info, info_span, trace, warn, Instrument};
 use serde_json::Value;
 use beam_lib::{AppId, TaskResult, TaskRequest, WorkStatus, FailureStrategy, MsgId};
 
@@ -105,7 +105,7 @@ async fn handle_via_tasks(req: Request<Incoming>, config: &Arc<Config>, target: 
     let msg = http_req_to_struct(req, &config.my_app_id, &target, config.expire).await?;
 
     // Send to Proxy
-    debug!("SENDING request to Proxy: {msg:?}");
+    debug!("SENDING request to Proxy: {msg:#?}");
     let resp = config.client.post(format!("{}v1/tasks", config.proxy_url))
         .header(header::AUTHORIZATION, auth.clone())
         .json(&msg)
@@ -126,16 +126,14 @@ async fn handle_via_tasks(req: Request<Incoming>, config: &Arc<Config>, target: 
             warn!("Got error from server: {e}");
             StatusCode::BAD_GATEWAY
         })?;
-    info!("Got reply: {:?}", resp);
+    trace!("Got beam reply: {resp:#?}");
 
     match resp.status() {
         StatusCode::PARTIAL_CONTENT => {
             warn!("Timeout fetching reply.");
             return Err(StatusCode::GATEWAY_TIMEOUT)?;
         },
-        StatusCode::OK => {
-            debug!("Got non-empty reply: {:?}", resp);
-        },
+        StatusCode::OK => {},
         e => {
             warn!("Error fetching reply, got code: {e}");
             return Err(StatusCode::BAD_GATEWAY)?;
@@ -147,19 +145,17 @@ async fn handle_via_tasks(req: Request<Incoming>, config: &Arc<Config>, target: 
             warn!("Unable to parse HTTP result: {}", e);
             StatusCode::BAD_GATEWAY
         })?;
-    debug!("Got reply: {:?}", task_results);
-
-    if task_results.len() != 1 {
+    let Some(result) = task_results.pop() else {
         error!("Reply had more than one answer (namely: {}). This should not happen; discarding request.", task_results.len());
-        return Err(StatusCode::BAD_GATEWAY)?;
-    }
-    let result = task_results.pop().unwrap();
+        return Err(StatusCode::INTERNAL_SERVER_ERROR.into());
+    };
+    debug!("Got reply with status {:?}: {:#?}", result.status, result.body);
     let response_inner = match result.status {
         WorkStatus::Succeeded => {
             result.body
         },
         e => {
-            warn!("Reply had unexpected workresult code: {e:?}");
+            warn!("Reply had unexpected workresult code: {e:?}: {:#?}", result.body);
             return Err(StatusCode::BAD_GATEWAY)?;
         }
     };
