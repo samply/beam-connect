@@ -2,7 +2,7 @@ use std::{pin::pin, sync::Arc};
 
 use beam_lib::{AppOrProxyId, TaskRequest, TaskResult, WorkStatus};
 use hyper::{header, StatusCode, Uri, Method, http::uri::PathAndQuery};
-use tracing::{debug, field, info, warn, Instrument, Span};
+use tracing::{debug, field, info, trace, warn, Instrument, Span};
 use serde_json::Value;
 use reqwest::{Client, Response};
 
@@ -178,7 +178,7 @@ async fn execute_http_task(task: &TaskRequest<HttpRequest>, config: &Config, cli
 }
 
 async fn fetch_task(config: &Config, client: &Client) -> Result<TaskRequest<HttpRequest>, BeamConnectError> {
-    info!("fetching requests from proxy");
+    debug!("fetching requests from proxy");
     let resp = client
         .get(format!("{}v1/tasks?to={}&wait_count=1&filter=todo", config.proxy_url, config.my_app_id))
         .header(header::AUTHORIZATION, config.proxy_auth.clone())
@@ -188,7 +188,7 @@ async fn fetch_task(config: &Config, client: &Client) -> Result<TaskRequest<Http
         .map_err(BeamConnectError::ProxyReqwestError)?;
     match resp.status() {
         StatusCode::OK => {
-            info!("Got request: {:?}", resp);
+            trace!("Got tasks from beam: {resp:#?}");
         },
         StatusCode::GATEWAY_TIMEOUT => return Err(BeamConnectError::ProxyTimeoutError),
         StatusCode::UNAUTHORIZED => return Err(BeamConnectError::ProxyRejectedAuthorization),
