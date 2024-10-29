@@ -1,4 +1,4 @@
-use std::{sync::Arc, str::FromStr};
+use std::str::FromStr;
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Full};
 use hyper::body::{Bytes, Incoming};
@@ -18,7 +18,7 @@ use crate::{config::Config, structs::MyStatusCode, msg::{HttpRequest, HttpRespon
 /// This function knows from its map which app to direct the message to 
 pub(crate) async fn handler_http(
     mut req: Request<Incoming>,
-    config: Arc<Config>,
+    config: &Config,
     https_authority: Option<Authority>,
 ) -> Result<Response, MyStatusCode> {
 
@@ -96,12 +96,12 @@ pub(crate) async fn handler_http(
     info!("{method} {} via {target}", req.uri());
     let span = info_span!("request", %method, via = %target, url = %req.uri());
     #[cfg(feature = "sockets")]
-    return crate::sockets::handle_via_sockets(req, &config, target, auth).instrument(span).await;
+    return crate::sockets::handle_via_sockets(req, config, target, auth).instrument(span).await;
     #[cfg(not(feature = "sockets"))]
     return handle_via_tasks(req, &config, target, auth).instrument(span).await;
 }
 
-async fn handle_via_tasks(req: Request<Incoming>, config: &Arc<Config>, target: &AppId, auth: HeaderValue) -> Result<Response, MyStatusCode> {
+async fn handle_via_tasks(req: Request<Incoming>, config: &Config, target: &AppId, auth: HeaderValue) -> Result<Response, MyStatusCode> {
     let msg = http_req_to_struct(req, &config.my_app_id, &target, config.expire).await?;
 
     // Send to Proxy
