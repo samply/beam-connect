@@ -1,4 +1,4 @@
-use std::{convert::Infallible, sync::Arc, time::Duration};
+use std::{convert::Infallible, time::Duration};
 
 use config::Config;
 use http_body_util::combinators::BoxBody;
@@ -28,7 +28,7 @@ async fn main() -> anyhow::Result<()> {
     tracing::subscriber::set_global_default(tracing_subscriber::fmt().with_env_filter(EnvFilter::builder().with_default_directive(LevelFilter::INFO.into()).from_env_lossy()).finish())?;
     banner::print_banner();
     let config = Config::load().await?;
-    let config2 = config.clone();
+    let config: &'static _ = Box::leak(Box::new(config));
     let client = config.client.clone();
     let client2 = client.clone();
     banner::print_startup_app_config(&config);
@@ -42,7 +42,7 @@ async fn main() -> anyhow::Result<()> {
         let mut timer= std::pin::pin!(tokio::time::sleep(Duration::from_secs(60)));
         loop {
             debug!("Waiting for next request ...");
-            if let Err(e) = logic_reply::process_requests(config2.clone(), client2.clone()).await {
+            if let Err(e) = logic_reply::process_requests(config, client2.clone()).await {
                 match e {
                     BeamConnectError::ProxyTimeoutError => {
                         debug!("{e}");
@@ -71,11 +71,9 @@ async fn main() -> anyhow::Result<()> {
     #[allow(unused_mut)]
     let mut executers = vec![http_executor];
     #[cfg(feature = "sockets")]
-    executers.push(sockets::spawn_socket_task_poller(config.clone()));
+    executers.push(sockets::spawn_socket_task_poller(config));
 
-    let config = Arc::new(config.clone());
-
-    if let Err(e) = server(&config).await {
+    if let Err(e) = server(config).await {
         error!("Server error: {}", e);
     }
     info!("Shutting down...");
@@ -84,7 +82,7 @@ async fn main() -> anyhow::Result<()> {
 }
 
 // See https://github.com/hyperium/hyper-util/blob/master/examples/server_graceful.rs
-async fn server(config: &Arc<Config>) -> anyhow::Result<()> {
+async fn server(config: &'static Config) -> anyhow::Result<()> {
     let listener = TcpListener::bind(config.bind_addr.clone()).await?;
 
     let server = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
@@ -106,9 +104,7 @@ async fn server(config: &Arc<Config>) -> anyhow::Result<()> {
 
                 let stream = hyper_util::rt::TokioIo::new(stream);
 
-                let config = config.clone();
                 let conn = server.serve_connection_with_upgrades(stream, service_fn(move |req| {
-                    let config = config.clone();
                     handler_http_wrapper(req, config)
                 }));
 
@@ -146,7 +142,7 @@ pub type Response<T = BoxBody<Bytes, anyhow::Error>> = hyper::Response<T>;
 
 pub(crate) async fn handler_http_wrapper(
     req: Request<Incoming>,
-    config: Arc<Config>,
+    config: &'static Config,
 ) -> Result<Response, Infallible> {
     // On https connections we want to emulate that we successfully connected to get the actual http request
     if req.method() == Method::CONNECT {
@@ -162,7 +158,6 @@ pub(crate) async fn handler_http_wrapper(
                         Ok(s) => s,
                     };
                     server::conn::auto::Builder::new(TokioExecutor::new()).serve_connection_with_upgrades(TokioIo::new(tls_connection), service_fn(|req| {
-                        let config = config.clone();
                         let authority = authority.clone();
                         async move {
                             match handler_http(req, config, authority).await {

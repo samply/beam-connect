@@ -1,4 +1,4 @@
-use std::{time::Duration, collections::HashSet, sync::Arc, convert::Infallible};
+use std::{time::Duration, collections::HashSet, convert::Infallible};
 
 use futures_util::TryStreamExt;
 use http_body_util::{combinators::BoxBody, BodyExt, BodyStream, StreamBody};
@@ -12,7 +12,7 @@ use reqwest::Response;
 use crate::{config::Config, errors::BeamConnectError, structs::MyStatusCode};
 
 
-pub(crate) fn spawn_socket_task_poller(config: Config) -> JoinHandle<()> {
+pub(crate) fn spawn_socket_task_poller(config: &'static Config) -> JoinHandle<()> {
     tokio::spawn(async move {
         use BeamConnectError::*;
         let mut seen: HashSet<MsgId> = HashSet::new();
@@ -41,10 +41,9 @@ pub(crate) fn spawn_socket_task_poller(config: Config) -> JoinHandle<()> {
                     warn!("Invalid app id skipping");
                     continue;
                 };
-                let config_clone = config.clone();
                 tokio::spawn(async move {
-                    match connect_proxy(&task.id, &config_clone).await {
-                        Ok(resp) => tunnel(resp, client, &config_clone).await,
+                    match connect_proxy(&task.id, config).await {
+                        Ok(resp) => tunnel(resp, client, config).await,
                         Err(e) => {
                             warn!("{e}");
                         },
@@ -200,7 +199,7 @@ fn tunnel_upgrade(client: Option<OnUpgrade>, server: Option<OnUpgrade>) {
     }
 }
 
-pub(crate) async fn handle_via_sockets(mut req: Request<Incoming>, config: &Arc<Config>, target: &AppId, auth: HeaderValue) -> Result<crate::Response, MyStatusCode> {
+pub(crate) async fn handle_via_sockets(mut req: Request<Incoming>, config: &Config, target: &AppId, auth: HeaderValue) -> Result<crate::Response, MyStatusCode> {
     let resp = config.client
         .post(format!("{}v1/sockets/{target}", config.proxy_url))
         .header(header::AUTHORIZATION, auth)
