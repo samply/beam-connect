@@ -1,25 +1,71 @@
-use beam_lib::{TaskRequest, TaskResult, WorkStatus, AppOrProxyId};
+use std::{pin::pin, sync::Arc};
+
+use beam_lib::{AppOrProxyId, TaskRequest, TaskResult, WorkStatus};
 use hyper::{header, StatusCode, Uri, Method, http::uri::PathAndQuery};
-use tracing::{debug, field, info, info_span, warn, Instrument, Span};
+use tracing::{debug, field, info, warn, Instrument, Span};
 use serde_json::Value;
 use reqwest::{Client, Response};
 
 use crate::{config::Config, errors::BeamConnectError, msg::{HttpResponse, HttpRequest}};
 
-pub(crate) async fn process_requests(config: Config, client: Client) -> Result<(), BeamConnectError> {
+pub(crate) async fn process_requests(config: &'static Config, client: Client) -> Result<(), BeamConnectError> {
     // Fetch tasks from Proxy
-    let msgs = fetch_requests(&config, &client).await?;
-
-    for task in msgs {
-        async {
-            // If we fail to execute the http task we should report this as a failure to beam
-            let resp = execute_http_task(&task, &config, &client).await;
-
-            send_reply(&task, &config, &client, resp).await
-        }.instrument(info_span!("task",from = %task.from.hide_broker(), method = field::Empty, orig_url = field::Empty, dst_url = field::Empty)).await?;
-    }
+    let task = fetch_task(&config, &client).await?;
+    claim_or_answer(task, &config, client).await?;
 
     Ok(())
+}
+
+#[tracing::instrument(skip_all, fields(from = %task.from.hide_broker(), method = %task.body.method, orig_url = %task.body.url, dst_url))]
+async fn claim_or_answer(task: TaskRequest<HttpRequest>, config: &'static Config, client: Client) -> Result<(), BeamConnectError> {
+    let task = Arc::new(task);
+    let task2 = Arc::clone(&task);
+    let client2 = client.clone();
+    let mut execute_task = Box::pin(async move {
+        execute_http_task(&task2, &config, client2).await
+    });
+    let mut claim_task = pin!(claim_task(&task, &config, &client));
+    tokio::select! {
+        claimed = &mut claim_task => {
+           claimed?; 
+           let task = Arc::clone(&task);
+           let client = client.clone();
+           tokio::spawn(async move {
+                if let Err(e) = send_reply(&task, &config, &client, execute_task.await).await {
+                    warn!("Failed to send execution result: {e}");
+                }
+           }.instrument(Span::current()));
+           Ok(())
+        },
+        resp = &mut execute_task => {
+            send_reply(&task, &config, &client, resp).await
+        }
+    }
+}
+
+async fn claim_task<T>(task: &TaskRequest<T>, config: &Config, client: &Client) -> Result<(), BeamConnectError> {
+    let msg = TaskResult {
+        from: config.my_app_id.clone().into(),
+        to: vec![task.from.clone()],
+        task: task.id,
+        status: WorkStatus::Claimed,
+        metadata: Value::Null,
+        body: (),
+    };
+    debug!("Claiming: {msg:?}");
+    let resp = client
+        .put(format!("{}v1/tasks/{}/results/{}", config.proxy_url, task.id, config.my_app_id.clone()))
+        .header(header::AUTHORIZATION, config.proxy_auth.clone())
+        .json(&msg)
+        .send()
+        .await
+        .map_err(BeamConnectError::ProxyReqwestError)?;
+
+    if let StatusCode::CREATED | StatusCode::NO_CONTENT = resp.status() {
+        Ok(())
+    } else {
+        Err(BeamConnectError::ProxyOtherError(format!("Got error code {} trying to submit our result.", resp.status())))
+    }
 }
 
 async fn send_reply(task: &TaskRequest<HttpRequest>, config: &Config, client: &Client, resp: Result<Response, BeamConnectError>) -> Result<(), BeamConnectError> {
@@ -65,14 +111,15 @@ async fn send_reply(task: &TaskRequest<HttpRequest>, config: &Config, client: &C
         .await
         .map_err(BeamConnectError::ProxyReqwestError)?;
 
-    if resp.status() != StatusCode::CREATED {
-        return Err(BeamConnectError::ProxyOtherError(format!("Got error code {} trying to submit our result.", resp.status())));
+    if let StatusCode::CREATED | StatusCode::NO_CONTENT = resp.status() {
+        Ok(())
+    } else {
+        Err(BeamConnectError::ProxyOtherError(format!("Got error code {} trying to submit our result.", resp.status())))
     }
-    Ok(())
 }
 
 // TODO: Take ownership of `task` to save clones
-async fn execute_http_task(task: &TaskRequest<HttpRequest>, config: &Config, client: &Client) -> Result<Response, BeamConnectError> {
+async fn execute_http_task(task: &TaskRequest<HttpRequest>, config: &Config, client: Client) -> Result<Response, BeamConnectError> {
     let task_req = &task.body;
     let span = Span::current();
     span.record("method", field::display(&task_req.method));
@@ -130,7 +177,7 @@ async fn execute_http_task(task: &TaskRequest<HttpRequest>, config: &Config, cli
     Ok(resp)
 }
 
-async fn fetch_requests(config: &Config, client: &Client) -> Result<Vec<TaskRequest<HttpRequest>>, BeamConnectError> {
+async fn fetch_task(config: &Config, client: &Client) -> Result<TaskRequest<HttpRequest>, BeamConnectError> {
     info!("fetching requests from proxy");
     let resp = client
         .get(format!("{}v1/tasks?to={}&wait_count=1&filter=todo", config.proxy_url, config.my_app_id))
@@ -149,8 +196,8 @@ async fn fetch_requests(config: &Config, client: &Client) -> Result<Vec<TaskRequ
             return Err(BeamConnectError::ProxyOtherError(format!("Got response code {}", resp.status())));
         }
     }
-    resp.json().await.map_err(|e| {
+    resp.json::<Vec<TaskRequest<HttpRequest>>>().await.map_err(|e| {
         warn!("Unable to decode TaskRequest<HttpRequest>; error: {e}.");
         BeamConnectError::ProxyOtherError(e.to_string())
-    })
+    })?.pop().ok_or(BeamConnectError::ProxyTimeoutError)
 }
