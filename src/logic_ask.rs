@@ -140,19 +140,23 @@ async fn handle_via_tasks(req: Request<Incoming>, config: &Config, target: &AppI
         }
     }
 
-    let mut task_results = resp.json::<Vec<TaskResult<HttpResponse>>>().await
+    let mut task_results = resp.json::<Vec<TaskResult<beam_lib::RawString>>>().await
         .map_err(|e| {
-            warn!("Unable to parse HTTP result: {}", e);
-            StatusCode::BAD_GATEWAY
+            warn!("Unable to parse beam results: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
         })?;
     let Some(result) = task_results.pop() else {
         error!("Reply had more than one answer (namely: {}). This should not happen; discarding request.", task_results.len());
         return Err(StatusCode::INTERNAL_SERVER_ERROR.into());
     };
     debug!("Got reply with status {:?}: {:#?}", result.status, result.body);
-    let response_inner = match result.status {
+    let response_inner: HttpResponse = match result.status {
         WorkStatus::Succeeded => {
-            result.body
+            serde_json::from_str(&result.body.0)
+                .map_err(|e| {
+                    warn!("Unable to parse HTTP response: {e}");
+                    StatusCode::BAD_GATEWAY
+                })?
         },
         e => {
             warn!("Reply had unexpected workresult code: {e:?}: {:#?}", result.body);

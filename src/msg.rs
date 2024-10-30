@@ -28,7 +28,6 @@ impl std::fmt::Debug for HttpResponse {
         f.debug_struct("HttpResponse")
             .field("status", &self.status)
             .field("headers", &self.headers)
-            .field("body", &String::from_utf8_lossy(&self.body).as_ref())
             .finish()
     }
 }
