@@ -29,8 +29,6 @@ async fn main() -> anyhow::Result<()> {
     banner::print_banner();
     let config = Config::load().await?;
     let config: &'static _ = Box::leak(Box::new(config));
-    let client = config.client.clone();
-    let client2 = client.clone();
     banner::print_startup_app_config(&config);
 
     info!("Global site discovery: {:?}", config.targets_public);
@@ -42,7 +40,7 @@ async fn main() -> anyhow::Result<()> {
         let mut timer= std::pin::pin!(tokio::time::sleep(Duration::from_secs(60)));
         loop {
             debug!("Waiting for next request ...");
-            if let Err(e) = logic_reply::process_requests(config, client2.clone()).await {
+            if let Err(e) = logic_reply::process_requests(config).await {
                 match e {
                     BeamConnectError::ProxyTimeoutError => {
                         debug!("{e}");
