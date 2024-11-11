@@ -117,6 +117,7 @@ async fn handle_via_tasks(req: Request<Incoming>, config: &Config, target: &AppI
     }
 
     let mut tries = 0_u8;
+    const MAX_RETRIES: u8 = 3;
     let resp = loop {
         let resp = config.client
             .get(format!("{}v1/tasks/{}/results?wait_count=1", config.proxy_url, msg.id))
@@ -132,7 +133,7 @@ async fn handle_via_tasks(req: Request<Incoming>, config: &Config, target: &AppI
 
         match resp.status() {
             StatusCode::OK => break resp,
-            s if tries > 3 => {
+            s if tries > MAX_RETRIES => {
                 warn!("Error fetching reply, got code: {s}. Giving up");
                 return Err(StatusCode::BAD_GATEWAY)?;
             },
