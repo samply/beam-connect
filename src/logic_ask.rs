@@ -116,29 +116,33 @@ async fn handle_via_tasks(req: Request<Incoming>, config: &Config, target: &AppI
         return Err(StatusCode::BAD_GATEWAY.into());
     }
 
-    let resp = config.client
-        .get(format!("{}v1/tasks/{}/results?wait_count=1&wait_timeout=10000", config.proxy_url, msg.id))
-        .header(header::AUTHORIZATION, auth)
-        .header(header::ACCEPT, "application/json")
-        .send()
-        .await
-        .map_err(|e| {
-            warn!("Got error from server: {e}");
-            StatusCode::BAD_GATEWAY
-        })?;
-    trace!("Got beam reply: {resp:#?}");
+    let mut tries = 0_u8;
+    let resp = loop {
+        let resp = config.client
+            .get(format!("{}v1/tasks/{}/results?wait_count=1", config.proxy_url, msg.id))
+            .header(header::AUTHORIZATION, auth.clone())
+            .header(header::ACCEPT, "application/json")
+            .send()
+            .await
+            .map_err(|e| {
+                warn!("Got error from server: {e}");
+                StatusCode::BAD_GATEWAY
+            })?;
+        trace!("Got beam reply: {resp:#?}");
 
-    match resp.status() {
-        StatusCode::PARTIAL_CONTENT => {
-            warn!("Timeout fetching reply.");
-            return Err(StatusCode::GATEWAY_TIMEOUT)?;
-        },
-        StatusCode::OK => {},
-        e => {
-            warn!("Error fetching reply, got code: {e}");
-            return Err(StatusCode::BAD_GATEWAY)?;
-        }
-    }
+        match resp.status() {
+            StatusCode::OK => break resp,
+            s if tries > 3 => {
+                warn!("Error fetching reply, got code: {s}. Giving up");
+                return Err(StatusCode::BAD_GATEWAY)?;
+            },
+            s => {
+                warn!("Failed to fetch reply, status: {s}. Retrying");
+                tries += 1;
+            }
+        };
+        tries += 1;
+    };
 
     let mut task_results = resp.json::<Vec<TaskResult<beam_lib::RawString>>>().await
         .map_err(|e| {
