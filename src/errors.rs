@@ -10,7 +10,7 @@ pub(crate) enum BeamConnectError {
     ProxyTimeoutError,
     #[error("Proxy rejected our authorization")]
     ProxyRejectedAuthorization,
-    #[error("Unable to communicate with Proxy: {0}")]
+    #[error("Unable to communicate with Proxy: {0:?}")]
     ProxyReqwestError(reqwest::Error),
     #[error("Unable to communicate with Proxy: {0}")]
     ProxyOtherError(String),
@@ -20,8 +20,10 @@ pub(crate) enum BeamConnectError {
     SerdeError(#[from] serde_json::Error),
     #[error("AppId {0} is not authorized to access URL {1}")]
     IdNotAuthorizedToAccessUrl(AppOrProxyId, Uri),
-    #[error("Unable to communicate with target host: {0}")]
-    CommunicationWithTargetFailed(String),
+    #[error("Unable to communicate with target host: {0:?}")]
+    CommunicationWithTargetFailed(reqwest::Error),
+    #[error("Lookup of local target {0} failed")]
+    NoLocalMapping(hyper::http::uri::Authority),
     #[error("Unable to fetch reply from target host: {0}")]
     FailedToReadTargetsReply(reqwest::Error),
     #[error("Response was not valid UTF-8: {0}")]

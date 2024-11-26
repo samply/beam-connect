@@ -116,19 +116,13 @@ async fn send_reply(task: &TaskRequest<HttpRequest>, config: &Config, resp: Resu
     }
 }
 
-// TODO: Take ownership of `task` to save clones
 async fn execute_http_task(task: &TaskRequest<HttpRequest>, config: &Config) -> Result<Response, BeamConnectError> {
     let task_req = &task.body;
-    let span = Span::current();
-    span.record("method", field::display(&task_req.method));
-    span.record("orig_url", field::display(&task_req.url));
+    let vhost = task_req.url.authority().expect("Url has an authority");
     let target = config
         .targets_local
-        .get(task_req.url.authority().unwrap()) //TODO unwrap
-        .ok_or_else(|| {
-            warn!("Lookup of local target {} failed", task_req.url.authority().unwrap());
-            BeamConnectError::CommunicationWithTargetFailed(String::from("Target not defined"))
-        })?;
+        .get(vhost) 
+        .ok_or_else(|| BeamConnectError::NoLocalMapping(vhost.clone()))?;
     match &task.from {
         AppOrProxyId::App(app) if target.can_be_accessed_by(app) => {},
         id => return Err(BeamConnectError::IdNotAuthorizedToAccessUrl(id.clone(), task_req.url.clone())),
@@ -155,7 +149,7 @@ async fn execute_http_task(task: &TaskRequest<HttpRequest>, config: &Config) -> 
         .authority(target.replace.authority.to_owned())
         .build()?;
 
-    span.record("dst_url", field::display(&uri));
+    Span::current().record("dst_url", field::display(&uri));
     let mut headers = task_req.headers.clone();
     if target.reset_host {
         // This will lead to reqwest generating a new HOST header coresponding to the new hostname of the url.
@@ -171,7 +165,7 @@ async fn execute_http_task(task: &TaskRequest<HttpRequest>, config: &Config) -> 
         .body(task_req.body.to_vec())
         .send()
         .await
-        .map_err(|e| BeamConnectError::CommunicationWithTargetFailed(e.to_string()))?;
+        .map_err(BeamConnectError::CommunicationWithTargetFailed)?;
     Ok(resp)
 }
 
