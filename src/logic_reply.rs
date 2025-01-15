@@ -1,6 +1,7 @@
 use std::{pin::pin, sync::Arc};
 
 use beam_lib::{AppOrProxyId, TaskRequest, TaskResult, WorkStatus};
+use futures_util::future::TryJoinAll;
 use hyper::{header, StatusCode, Uri, Method, http::uri::PathAndQuery};
 use tracing::{debug, field, info, trace, warn, Instrument, Span};
 use serde_json::Value;
@@ -9,10 +10,13 @@ use reqwest::Response;
 use crate::{config::Config, errors::BeamConnectError, msg::{HttpResponse, HttpRequest}};
 
 pub(crate) async fn process_requests(config: &'static Config) -> Result<(), BeamConnectError> {
-    // Fetch tasks from Proxy
-    let task = fetch_task(&config).await?;
-    claim_or_answer(task, &config).await?;
-
+    // Fetch a batch of tasks and executed them in parallel
+    fetch_task(&config)
+        .await?
+        .into_iter()
+        .map(|task| claim_or_answer(task, config))
+        .collect::<TryJoinAll<_>>()
+        .await?;
     Ok(())
 }
 
@@ -169,7 +173,7 @@ async fn execute_http_task(task: &TaskRequest<HttpRequest>, config: &Config) -> 
     Ok(resp)
 }
 
-async fn fetch_task(config: &Config) -> Result<TaskRequest<HttpRequest>, BeamConnectError> {
+async fn fetch_task(config: &Config) -> Result<Vec<TaskRequest<HttpRequest>>, BeamConnectError> {
     debug!("fetching requests from proxy");
     let resp = config.client
         .get(format!("{}v1/tasks?to={}&wait_count=1&filter=todo", config.proxy_url, config.my_app_id))
@@ -191,5 +195,5 @@ async fn fetch_task(config: &Config) -> Result<TaskRequest<HttpRequest>, BeamCon
     resp.json::<Vec<TaskRequest<HttpRequest>>>().await.map_err(|e| {
         warn!("Unable to decode TaskRequest<HttpRequest>; error: {e}.");
         BeamConnectError::ProxyOtherError(e.to_string())
-    })?.pop().ok_or(BeamConnectError::ProxyTimeoutError)
+    }).map_err(Into::into)
 }
