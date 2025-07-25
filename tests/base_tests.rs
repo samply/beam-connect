@@ -29,6 +29,13 @@ pub async fn test_json(scheme: &str) {
     assert_eq!(received.get("path"), Some(&json!("/post/")))
 }
 
+pub async fn test_path_match(scheme: &str) {
+    let res = TEST_CLIENT.get(format!("{scheme}://echo-allowed/foo/bar/allowed")).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "Could not make normal request via beam-connect");
+    let received: Value = res.json().await.unwrap();
+    assert_eq!(received.get("path"), Some(&json!("/get/foo/bar/allowed")))
+}
+
 pub async fn test_replace_header(scheme: &str) {
     let res = TEST_CLIENT.get(format!("{scheme}://invalid-authority?foo1=bar1&foo2=bar2")).header("x-replace-host", "echo-get").send().await.unwrap();
     assert_eq!(res.status(), StatusCode::OK, "Could not make normal request with header replacement via beam-connect");
@@ -64,6 +71,7 @@ pub async fn test_empty_authority() { // Test only works with http, so no macro 
 test_http_and_https!{test_normal}
 test_http_and_https!{test_json}
 test_http_and_https!{test_replace_header}
+test_http_and_https!{test_path_match}
 
 #[cfg(feature = "sockets")]
 #[cfg(test)]

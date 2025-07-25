@@ -18,6 +18,7 @@ pub(crate) fn example_local(broker_id: &str) -> LocalMapping {
         allowed,
         force_https: false,
         reset_host: false,
+        external_path: None,
     })
     .into_iter()
     .collect()};

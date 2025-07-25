@@ -3,6 +3,7 @@ use std::{path::PathBuf, fs::{read_to_string, self}, str::FromStr, sync::Arc};
 use anyhow::Result;
 use clap::Parser;
 use hyper::{Uri, http::uri::Authority};
+use regex::Regex;
 use reqwest::{Certificate, Client};
 use tokio_native_tls::{TlsAcceptor, native_tls::{self, Identity}};
 use serde::{Serialize, Deserialize};
@@ -115,9 +116,9 @@ pub(crate) struct LocalMapping {
     pub(crate) entries: Vec<LocalMappingEntry>
 }
 impl LocalMapping {
-    pub(crate) fn get(&self, auth: &Authority) -> Option<LocalMappingEntry> {
+    pub(crate) fn get(&self, uri: &Uri) -> Option<LocalMappingEntry> {
         for entry in &self.entries {
-            if entry.needle == *auth {
+            if Some(&entry.needle) == uri.authority() && entry.external_path.as_ref().map_or(true, |r| r.is_match(uri.path())) {
                 return Some(entry.clone())
             }
         }
@@ -137,6 +138,20 @@ pub(crate) struct LocalMappingEntry {
     pub(crate) force_https: bool,
     #[serde(default, rename = "resetHost")]
     pub(crate) reset_host: bool,
+    #[serde(default, rename = "externalPathRegex", deserialize_with = "deserialize_regex")]
+    pub(crate) external_path: Option<Regex>,
+}
+
+fn deserialize_regex<'de, D>(deserializer: D) -> Result<Option<Regex>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    match Option::<String>::deserialize(deserializer)? {
+        Some(regex_str) => Regex::new(&regex_str)
+            .map(Some)
+            .map_err(serde::de::Error::custom),
+        None => Ok(None),
+    }
 }
 
 impl LocalMappingEntry {
@@ -348,7 +363,7 @@ mod tests {
         let obj: LocalMapping = LocalMapping{entries:serde_json::from_str(serialized).unwrap()};
         let expect = example_local(&broker_id);
         assert_eq!(obj.entries.len(), expect.entries.len());
-        assert!(obj.get(&hyper::http::uri::Authority::from_static("node23.uk12.network")).unwrap().can_be_accessed_by(&AppId::new("foobar.proxy23.broker.ccp-it.dktk.dkfz.de").unwrap()));
+        assert!(obj.get(&hyper::Uri::from_static("http://node23.uk12.network")).unwrap().can_be_accessed_by(&AppId::new("foobar.proxy23.broker.ccp-it.dktk.dkfz.de").unwrap()));
 
         for (entry,ref_entry) in obj.entries.iter().zip(expect.entries.iter()) {
             assert_eq!(entry.needle,ref_entry.needle);
