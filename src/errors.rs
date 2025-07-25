@@ -23,7 +23,7 @@ pub(crate) enum BeamConnectError {
     #[error("Unable to communicate with target host: {0:?}")]
     CommunicationWithTargetFailed(reqwest::Error),
     #[error("Lookup of local target {0} failed")]
-    NoLocalMapping(hyper::http::uri::Authority),
+    NoLocalMapping(Uri),
     #[error("Unable to fetch reply from target host: {0}")]
     FailedToReadTargetsReply(reqwest::Error),
     #[error("Response was not valid UTF-8: {0}")]

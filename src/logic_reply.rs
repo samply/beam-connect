@@ -122,11 +122,10 @@ async fn send_reply(task: &TaskRequest<HttpRequest>, config: &Config, resp: Resu
 
 async fn execute_http_task(task: &TaskRequest<HttpRequest>, config: &Config) -> Result<Response, BeamConnectError> {
     let task_req = &task.body;
-    let vhost = task_req.url.authority().expect("Url has an authority");
     let target = config
         .targets_local
-        .get(vhost) 
-        .ok_or_else(|| BeamConnectError::NoLocalMapping(vhost.clone()))?;
+        .get(&task_req.url) 
+        .ok_or_else(|| BeamConnectError::NoLocalMapping(task_req.url.clone()))?;
     match &task.from {
         AppOrProxyId::App(app) if target.can_be_accessed_by(app) => {},
         id => return Err(BeamConnectError::IdNotAuthorizedToAccessUrl(id.clone(), task_req.url.clone())),

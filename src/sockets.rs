@@ -121,17 +121,17 @@ async fn tunnel(proxy: Response, client: AppId, config: &Config) {
 }
 
 async fn execute_http_task(mut req: Request<Incoming>, app: &AppId, config: &Config) -> Result<crate::Response, StatusCode> {
-    let authority = req.uri().authority().expect("Authority is always set by the requesting beam-connect");
-    let Some(target) = config.targets_local.get(authority) else {
-        warn!("Failed to lookup authority {authority}");
+    let uri = req.uri();
+    let Some(target) = config.targets_local.get(uri) else {
+        warn!("Failed to lookup uri {uri}");
         return Err(StatusCode::BAD_REQUEST);
     };
     if !target.can_be_accessed_by(&app) {
-        warn!("App {app} not authorized to access url {}", req.uri());
+        warn!("App {app} not authorized to access url {uri}");
         return Err(StatusCode::UNAUTHORIZED);
     };
     *req.uri_mut() = {
-        let mut parts = req.uri().to_owned().into_parts();
+        let mut parts = uri.to_owned().into_parts();
         if target.force_https {
             parts.scheme = Some(hyper::http::uri::Scheme::HTTPS)
         }
