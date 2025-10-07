@@ -94,9 +94,9 @@ mod socket_tests {
         let socket = resp.upgrade().await.unwrap();
         let mut stream = WebSocketStream::from_raw_socket(socket, Role::Client, None).await;
         let _server_hello = stream.next().await.unwrap().unwrap();
-        stream.send(Message::Text("Hello World".to_string())).await.unwrap();
+        stream.send(Message::Text("Hello World".to_string().into())).await.unwrap();
         let res = stream.next().await.unwrap().unwrap();
-        assert_eq!(res, Message::Text("Hello World".to_string()));
+        assert_eq!(res, Message::Text("Hello World".to_string().into()));
         stream.close(None).await.unwrap();
     }
 }
