@@ -13,7 +13,7 @@ pub(crate) struct HttpRequest {
     pub(crate) body: Vec<u8>
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub(crate) struct HttpResponse {
     #[serde(with = "http_serde::status_code")]
     pub(crate) status: StatusCode,
@@ -21,6 +21,15 @@ pub(crate) struct HttpResponse {
     pub(crate) headers: HeaderMap,
     #[serde(with = "serde_base64")]
     pub(crate) body: Vec<u8>
+}
+
+impl std::fmt::Debug for HttpResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HttpResponse")
+            .field("status", &self.status)
+            .field("headers", &self.headers)
+            .finish()
+    }
 }
 
 

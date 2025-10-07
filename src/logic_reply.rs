@@ -1,26 +1,76 @@
-use beam_lib::{TaskRequest, TaskResult, WorkStatus, AppOrProxyId};
-use hyper::{header, StatusCode, body, Uri, Method, http::uri::PathAndQuery};
-use tracing::{info, warn, debug};
+use std::{pin::pin, sync::Arc};
+
+use beam_lib::{AppOrProxyId, TaskRequest, TaskResult, WorkStatus};
+use futures_util::future::TryJoinAll;
+use hyper::{header, StatusCode, Uri, Method, http::uri::PathAndQuery};
+use tracing::{debug, field, info, trace, warn, Instrument, Span};
 use serde_json::Value;
-use reqwest::{Client, Response};
+use reqwest::Response;
 
 use crate::{config::Config, errors::BeamConnectError, msg::{HttpResponse, HttpRequest}};
 
-pub(crate) async fn process_requests(config: Config, client: Client) -> Result<(), BeamConnectError> {
-    // Fetch tasks from Proxy
-    let msgs = fetch_requests(&config, &client).await?;
-
-    for task in msgs {
-        // If we fail to execute the http task we should report this as a failure to beam
-        let resp = execute_http_task(&task, &config, &client).await;
-
-        send_reply(&task, &config, &client, resp).await?;
-    }
-
+pub(crate) async fn process_requests(config: &'static Config) -> Result<(), BeamConnectError> {
+    // Fetch a batch of tasks and executed them in parallel
+    fetch_task(&config)
+        .await?
+        .into_iter()
+        .map(|task| claim_or_answer(task, config))
+        .collect::<TryJoinAll<_>>()
+        .await?;
     Ok(())
 }
 
-async fn send_reply(task: &TaskRequest<HttpRequest>, config: &Config, client: &Client, resp: Result<Response, BeamConnectError>) -> Result<(), BeamConnectError> {
+#[tracing::instrument(skip_all, fields(from = %task.from.hide_broker(), method = %task.body.method, orig_url = %task.body.url, dst_url))]
+async fn claim_or_answer(task: TaskRequest<HttpRequest>, config: &'static Config) -> Result<(), BeamConnectError> {
+    let task = Arc::new(task);
+    let task2 = Arc::clone(&task);
+    let mut execute_task = Box::pin(async move {
+        execute_http_task(&task2, &config).await
+    });
+    let mut claim_task = pin!(claim_task(&task, &config));
+    tokio::select! {
+        claimed = &mut claim_task => {
+           claimed?; 
+           let task = Arc::clone(&task);
+           tokio::spawn(async move {
+                if let Err(e) = send_reply(&task, &config, execute_task.await).await {
+                    warn!("Failed to send execution result: {e}");
+                }
+           }.instrument(Span::current()));
+           Ok(())
+        },
+        resp = &mut execute_task => {
+            send_reply(&task, &config, resp).await
+        }
+    }
+}
+
+async fn claim_task<T>(task: &TaskRequest<T>, config: &Config) -> Result<(), BeamConnectError> {
+    let msg = TaskResult {
+        from: config.my_app_id.clone().into(),
+        to: vec![task.from.clone()],
+        task: task.id,
+        status: WorkStatus::Claimed,
+        metadata: Value::Null,
+        body: (),
+    };
+    debug!("Claiming: {msg:?}");
+    let resp = config.client
+        .put(format!("{}v1/tasks/{}/results/{}", config.proxy_url, task.id, config.my_app_id.clone()))
+        .header(header::AUTHORIZATION, config.proxy_auth.clone())
+        .json(&msg)
+        .send()
+        .await
+        .map_err(BeamConnectError::ProxyReqwestError)?;
+
+    if let StatusCode::CREATED | StatusCode::NO_CONTENT = resp.status() {
+        Ok(())
+    } else {
+        Err(BeamConnectError::ProxyOtherError(format!("Got error code {} trying to submit our result.", resp.status())))
+    }
+}
+
+async fn send_reply(task: &TaskRequest<HttpRequest>, config: &Config, resp: Result<Response, BeamConnectError>) -> Result<(), BeamConnectError> {
     let (reply_body, status) = match resp {
         Ok(resp) => {
             let status = resp.status();
@@ -55,7 +105,7 @@ async fn send_reply(task: &TaskRequest<HttpRequest>, config: &Config, client: &C
         body: reply_body,
     };
     debug!("Delivering response to Proxy: {msg:?}");
-    let resp = client
+    let resp = config.client
         .put(format!("{}v1/tasks/{}/results/{}", config.proxy_url, task.id, config.my_app_id.clone()))
         .header(header::AUTHORIZATION, config.proxy_auth.clone())
         .json(&msg)
@@ -63,25 +113,21 @@ async fn send_reply(task: &TaskRequest<HttpRequest>, config: &Config, client: &C
         .await
         .map_err(BeamConnectError::ProxyReqwestError)?;
 
-    if resp.status() != StatusCode::CREATED {
-        return Err(BeamConnectError::ProxyOtherError(format!("Got error code {} trying to submit our result.", resp.status())));
+    if let StatusCode::CREATED | StatusCode::NO_CONTENT = resp.status() {
+        Ok(())
+    } else {
+        Err(BeamConnectError::ProxyOtherError(format!("Got error code {} trying to submit our result.", resp.status())))
     }
-    Ok(())
 }
 
-// TODO: Take ownership of `task` to save clones
-async fn execute_http_task(task: &TaskRequest<HttpRequest>, config: &Config, client: &Client) -> Result<Response, BeamConnectError> {
+async fn execute_http_task(task: &TaskRequest<HttpRequest>, config: &Config) -> Result<Response, BeamConnectError> {
     let task_req = &task.body;
-    info!("{} | {} {}", task.from, task_req.method, task_req.url);
     let target = config
         .targets_local
-        .get(task_req.url.authority().unwrap()) //TODO unwrap
-        .ok_or_else(|| {
-            warn!("Lookup of local target {} failed", task_req.url.authority().unwrap());
-            BeamConnectError::CommunicationWithTargetFailed(String::from("Target not defined"))
-        })?;
+        .get(&task_req.url) 
+        .ok_or_else(|| BeamConnectError::NoLocalMapping(task_req.url.clone()))?;
     match &task.from {
-        AppOrProxyId::App(app) if target.allowed.contains(app) => {},
+        AppOrProxyId::App(app) if target.can_be_accessed_by(app) => {},
         id => return Err(BeamConnectError::IdNotAuthorizedToAccessUrl(id.clone(), task_req.url.clone())),
     };
     if task_req.method == Method::CONNECT {
@@ -106,20 +152,29 @@ async fn execute_http_task(task: &TaskRequest<HttpRequest>, config: &Config, cli
         .authority(target.replace.authority.to_owned())
         .build()?;
 
-    info!("Rewritten to: {} {}", task_req.method, uri);
-    let resp = client
+    Span::current().record("dst_url", field::display(&uri));
+    let mut headers = task_req.headers.clone();
+    if target.reset_host {
+        // This will lead to reqwest generating a new HOST header coresponding to the new hostname of the url.
+        // If we don't do this it can lead to problems with reverse proxies because
+        // they will look at the old HOST header (the virtual host) in order to route the request.
+        tracing::trace!("Resetting host header");
+        headers.remove(header::HOST);
+    }
+    info!("Executing");
+    let resp = config.client
         .request(task_req.method.clone(), uri.to_string())
-        .headers(task_req.headers.clone())
-        .body(body::Body::from(task_req.body.clone()))
+        .headers(headers)
+        .body(task_req.body.to_vec())
         .send()
         .await
-        .map_err(|e| BeamConnectError::CommunicationWithTargetFailed(e.to_string()))?;
+        .map_err(BeamConnectError::CommunicationWithTargetFailed)?;
     Ok(resp)
 }
 
-async fn fetch_requests(config: &Config, client: &Client) -> Result<Vec<TaskRequest<HttpRequest>>, BeamConnectError> {
-    info!("fetching requests from proxy");
-    let resp = client
+async fn fetch_task(config: &Config) -> Result<Vec<TaskRequest<HttpRequest>>, BeamConnectError> {
+    debug!("fetching requests from proxy");
+    let resp = config.client
         .get(format!("{}v1/tasks?to={}&wait_count=1&filter=todo", config.proxy_url, config.my_app_id))
         .header(header::AUTHORIZATION, config.proxy_auth.clone())
         .header(header::ACCEPT, "application/json")
@@ -128,15 +183,16 @@ async fn fetch_requests(config: &Config, client: &Client) -> Result<Vec<TaskRequ
         .map_err(BeamConnectError::ProxyReqwestError)?;
     match resp.status() {
         StatusCode::OK => {
-            info!("Got request: {:?}", resp);
+            trace!("Got tasks from beam: {resp:#?}");
         },
         StatusCode::GATEWAY_TIMEOUT => return Err(BeamConnectError::ProxyTimeoutError),
+        StatusCode::UNAUTHORIZED => return Err(BeamConnectError::ProxyRejectedAuthorization),
         _ => {
             return Err(BeamConnectError::ProxyOtherError(format!("Got response code {}", resp.status())));
         }
     }
-    resp.json().await.map_err(|e| {
+    resp.json::<Vec<TaskRequest<HttpRequest>>>().await.map_err(|e| {
         warn!("Unable to decode TaskRequest<HttpRequest>; error: {e}.");
         BeamConnectError::ProxyOtherError(e.to_string())
-    })
+    }).map_err(Into::into)
 }

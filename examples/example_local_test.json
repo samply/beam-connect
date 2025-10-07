@@ -15,6 +15,18 @@
         "allowed": ["app1.proxy1.broker"]
     },
     {
+        "external": "echo-allowed",
+        "externalPathRegex": "^.*/allowed$",
+        "internal": "my.example.com/get",
+        "allowed": ["app1.proxy1.broker"]
+    },
+    {
+        "external": "echo-allowed:443",
+        "externalPathRegex": "^.*/allowed$",
+        "internal": "my.example.com/get",
+        "allowed": ["app1.proxy1.broker"]
+    },
+    {
         "external": "echo-post:443",
         "internal": "my.example.com:443/post",
         "allowed": ["app1.proxy1.broker"]

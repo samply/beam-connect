@@ -15,6 +15,18 @@
         {
             "id": "C2",
             "name": "connect2",
+            "virtualhost": "echo-allowed",
+            "beamconnect": "app2.proxy2.broker"
+        },
+        {
+            "id": "C2",
+            "name": "connect2",
+            "virtualhost": "echo-allowed:443",
+            "beamconnect": "app2.proxy2.broker"
+        },
+        {
+            "id": "C2",
+            "name": "connect2",
             "virtualhost": "echo-post",
             "beamconnect": "app2.proxy2.broker"
         },
