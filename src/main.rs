@@ -46,9 +46,7 @@ async fn main() -> anyhow::Result<()> {
             debug!("Waiting for next request ...");
             if let Err(e) = logic_reply::process_requests(config).await {
                 match e {
-                    BeamConnectError::ProxyTimeoutError => {
-                        debug!("{e}");
-                    },
+                    BeamConnectError::ProxyTimeoutError => (),
                     BeamConnectError::ProxyRejectedAuthorization => {
                         error!("Stopping task polling: {e}");
                         break
@@ -58,7 +56,6 @@ async fn main() -> anyhow::Result<()> {
                         warn!("Error in processing request: {e}. Will continue with the next one.");
                     },
                     _ => {
-                        tries += 1;
                         warn!("Failed to process requests: {e}. Retrying in 30s.");
                         tokio::time::sleep(Duration::from_secs(30)).await;
                     }

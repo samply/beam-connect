@@ -1,4 +1,4 @@
-use std::{pin::pin, sync::Arc};
+use std::{pin::pin, sync::Arc, time::Duration};
 
 use beam_lib::{AppOrProxyId, TaskRequest, TaskResult, WorkStatus};
 use futures_util::future::TryJoinAll;
@@ -174,6 +174,7 @@ async fn execute_http_task(task: &TaskRequest<HttpRequest>, config: &Config) -> 
 
 async fn fetch_task(config: &Config) -> Result<Vec<TaskRequest<HttpRequest>>, BeamConnectError> {
     debug!("fetching requests from proxy");
+    let probably_timeout = tokio::time::sleep(Duration::from_secs(20));
     let resp = config.client
         .get(format!("{}v1/tasks?to={}&wait_count=1&filter=todo", config.proxy_url, config.my_app_id))
         .header(header::AUTHORIZATION, config.proxy_auth.clone())
@@ -182,11 +183,15 @@ async fn fetch_task(config: &Config) -> Result<Vec<TaskRequest<HttpRequest>>, Be
         .await
         .map_err(BeamConnectError::ProxyReqwestError)?;
     match resp.status() {
-        StatusCode::OK => {
+        StatusCode::OK | StatusCode::PARTIAL_CONTENT => {
             trace!("Got tasks from beam: {resp:#?}");
         },
         StatusCode::GATEWAY_TIMEOUT => return Err(BeamConnectError::ProxyTimeoutError),
         StatusCode::UNAUTHORIZED => return Err(BeamConnectError::ProxyRejectedAuthorization),
+        s if probably_timeout.is_elapsed() => {
+            debug!("Request to proxy timed out with StatusCode {s}");
+            return Err(BeamConnectError::ProxyTimeoutError)
+        },
         _ => {
             return Err(BeamConnectError::ProxyOtherError(format!("Got response code {}", resp.status())));
         }
