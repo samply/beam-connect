@@ -36,6 +36,10 @@ async fn main() -> anyhow::Result<()> {
 
 
     let http_executor = tokio::task::spawn(async move {
+        if config.targets_local.entries.is_empty() {
+            info!("No local targets configured, will not poll for tasks.");
+            return;
+        };
         let mut tries = 0_u32;
         let mut timer= std::pin::pin!(tokio::time::sleep(Duration::from_secs(60)));
         loop {
