@@ -48,7 +48,7 @@ regex = "1"
 sockets = ["beam-lib/sockets"]
 
 [build-dependencies]
-build-data = "0.2"
+build-data = "0.3"
 
 [dev-dependencies]
 once_cell = "1"
