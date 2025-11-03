@@ -15,7 +15,7 @@ use crate::{config::Config, structs::MyStatusCode, msg::{HttpRequest, HttpRespon
 
 /// GET   http://some.internal.system?a=b&c=d
 /// Host: <identical>
-/// This function knows from its map which app to direct the message to 
+/// This function knows from its map which app to direct the message to
 pub(crate) async fn handler_http(
     mut req: Request<Incoming>,
     config: &Config,
@@ -160,12 +160,12 @@ async fn handle_via_tasks(req: Request<Incoming>, config: &Config, target: &AppI
             serde_json::from_str(&result.body.0)
                 .map_err(|e| {
                     warn!("Unable to parse HTTP response: {e}");
-                    StatusCode::BAD_GATEWAY
+                    StatusCode::BAD_REQUEST
                 })?
         },
         e => {
             warn!("Reply had unexpected workresult code: {e:?}: {:#?}", result.body);
-            return Err(StatusCode::BAD_GATEWAY)?;
+            return Err(StatusCode::BAD_REQUEST)?;
         }
     };
 
@@ -216,7 +216,7 @@ async fn http_req_to_struct(mut req: Request<Incoming>, my_id: &AppId, target_id
         ttl: format!("{expire}s"),
         id: MsgId::new()
     };
-    
+
     Ok(msg)
 }
 
