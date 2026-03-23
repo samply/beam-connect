@@ -1,10 +1,10 @@
-use std::{string::FromUtf8Error, error::Error, fmt::Display};
+use std::{error::Error, fmt::Display, string::FromUtf8Error};
 
 use hyper::{StatusCode, header::ToStrError};
 
 #[derive(Debug)]
 pub(crate) struct MyStatusCode {
-    pub(crate) code: StatusCode
+    pub(crate) code: StatusCode,
 }
 
 impl From<StatusCode> for MyStatusCode {
@@ -15,7 +15,9 @@ impl From<StatusCode> for MyStatusCode {
 
 impl From<ToStrError> for MyStatusCode {
     fn from(_: ToStrError) -> Self {
-        Self { code: StatusCode::BAD_REQUEST }
+        Self {
+            code: StatusCode::BAD_REQUEST,
+        }
     }
 }
 
@@ -27,13 +29,17 @@ impl From<MyStatusCode> for StatusCode {
 
 impl From<FromUtf8Error> for MyStatusCode {
     fn from(_: FromUtf8Error) -> Self {
-        Self { code: StatusCode::UNPROCESSABLE_ENTITY }
+        Self {
+            code: StatusCode::UNPROCESSABLE_ENTITY,
+        }
     }
 }
 
 impl From<serde_json::Error> for MyStatusCode {
     fn from(_: serde_json::Error) -> Self {
-        Self { code: StatusCode::UNPROCESSABLE_ENTITY }
+        Self {
+            code: StatusCode::UNPROCESSABLE_ENTITY,
+        }
     }
 }
 

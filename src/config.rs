@@ -1,16 +1,24 @@
-use std::{path::PathBuf, fs::{read_to_string, self}, str::FromStr, sync::Arc};
+use std::{
+    fs::{self, read_to_string},
+    path::PathBuf,
+    str::FromStr,
+    sync::Arc,
+};
 
 use anyhow::Result;
+use beam_lib::{AppId, AppOrProxyId, set_broker_id};
 use clap::Parser;
 use hyper::{Uri, http::uri::Authority};
 use regex::Regex;
 use reqwest::{Certificate, Client};
-use tokio_native_tls::{TlsAcceptor, native_tls::{self, Identity}};
-use serde::{Serialize, Deserialize};
-use beam_lib::{set_broker_id, AppId, AppOrProxyId};
+use serde::{Deserialize, Serialize};
+use tokio_native_tls::{
+    TlsAcceptor,
+    native_tls::{self, Identity},
+};
 use tracing::warn;
 
-use crate::{example_targets, errors::BeamConnectError};
+use crate::{errors::BeamConnectError, example_targets};
 
 #[derive(Debug, Clone)]
 enum PathOrUri {
@@ -29,7 +37,9 @@ impl FromStr for PathOrUri {
                 if p.is_file() {
                     Ok(Self::Path(p))
                 } else {
-                    Err(BeamConnectError::ConfigurationError(format!("Failed to convert {s} to Filepath or Uri")))
+                    Err(BeamConnectError::ConfigurationError(format!(
+                        "Failed to convert {s} to Filepath or Uri"
+                    )))
                 }
             }
         }
@@ -37,7 +47,7 @@ impl FromStr for PathOrUri {
 }
 
 /// Settings for Samply.Beam (Shared)
-#[derive(Parser,Debug)]
+#[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct CliArgs {
     #[clap(long, env, value_parser)]
@@ -68,11 +78,21 @@ struct CliArgs {
     tls_ca_certificates_dir: Option<PathBuf>,
 
     /// Pem file used for ssl support. Will use a snakeoil pem if unset.
-    #[clap(long, env, value_parser, default_value = "/etc/ssl/certs/ssl-cert-snakeoil.pem")]
+    #[clap(
+        long,
+        env,
+        value_parser,
+        default_value = "/etc/ssl/certs/ssl-cert-snakeoil.pem"
+    )]
     ssl_cert_pem: PathBuf,
 
     /// Key file used for ssl support. Will use a snakeoil key if unset.
-    #[clap(long, env, value_parser, default_value = "/etc/ssl/private/ssl-cert-snakeoil.key")]
+    #[clap(
+        long,
+        env,
+        value_parser,
+        default_value = "/etc/ssl/private/ssl-cert-snakeoil.key"
+    )]
     ssl_cert_key: PathBuf,
 
     /// Expiry time of the request in seconds
@@ -85,19 +105,19 @@ struct CliArgs {
     no_auth: bool,
 }
 
-#[derive(Serialize, Deserialize,Clone,Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub(crate) struct CentralMapping {
-    pub(crate) sites: Vec<Site>
+    pub(crate) sites: Vec<Site>,
 }
 
 impl CentralMapping {
     pub(crate) fn get(&self, auth: &Authority) -> Option<&Site> {
         for site in &self.sites {
             if site.virtualhost == *auth {
-                return Some(site)
+                return Some(site);
             }
         }
-        return None
+        return None;
     }
 }
 
@@ -113,32 +133,41 @@ pub(crate) struct Site {
 
 #[derive(Clone, Deserialize, Debug)]
 pub(crate) struct LocalMapping {
-    pub(crate) entries: Vec<LocalMappingEntry>
+    pub(crate) entries: Vec<LocalMappingEntry>,
 }
 impl LocalMapping {
     pub(crate) fn get(&self, uri: &Uri) -> Option<LocalMappingEntry> {
         for entry in &self.entries {
-            if Some(&entry.needle) == uri.authority() && entry.external_path.as_ref().map_or(true, |r| r.is_match(uri.path())) {
-                return Some(entry.clone())
+            if Some(&entry.needle) == uri.authority()
+                && entry
+                    .external_path
+                    .as_ref()
+                    .map_or(true, |r| r.is_match(uri.path()))
+            {
+                return Some(entry.clone());
             }
         }
-        return None
+        return None;
     }
 }
 
 /// Maps an external authority to some internal authority if the requesting App is allowed to
 #[derive(Clone, Deserialize, Debug)]
 pub(crate) struct LocalMappingEntry {
-    #[serde(with = "http_serde::authority", rename="external")]
+    #[serde(with = "http_serde::authority", rename = "external")]
     pub(crate) needle: Authority, // Host part of URL
-    #[serde(rename="internal")]
+    #[serde(rename = "internal")]
     pub(crate) replace: AuthorityReplacement,
     pub(crate) allowed: Vec<AppOrProxyId>,
     #[serde(default, rename = "forceHttps")]
     pub(crate) force_https: bool,
     #[serde(default, rename = "resetHost")]
     pub(crate) reset_host: bool,
-    #[serde(default, rename = "externalPathRegex", deserialize_with = "deserialize_regex")]
+    #[serde(
+        default,
+        rename = "externalPathRegex",
+        deserialize_with = "deserialize_regex"
+    )]
     pub(crate) external_path: Option<Regex>,
 }
 
@@ -166,18 +195,22 @@ impl LocalMappingEntry {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AuthorityReplacement {
     pub authority: Authority,
-    pub path: Option<String>
+    pub path: Option<String>,
 }
 
 impl From<Authority> for AuthorityReplacement {
     fn from(authority: Authority) -> Self {
-        Self { authority, path: None }
+        Self {
+            authority,
+            path: None,
+        }
     }
 }
 
 impl<'de> Deserialize<'de> for AuthorityReplacement {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where D: serde::Deserializer<'de>
+    where
+        D: serde::Deserializer<'de>,
     {
         let string = String::deserialize(deserializer)?;
         match string.split_once('/') {
@@ -188,7 +221,7 @@ impl<'de> Deserialize<'de> for AuthorityReplacement {
             None => Ok(Self {
                 authority: string.parse().map_err(serde::de::Error::custom)?,
                 path: None,
-            })
+            }),
         }
     }
 }
@@ -208,31 +241,51 @@ pub(crate) struct Config {
     pub(crate) no_auth: bool,
 }
 
-fn load_local_targets(broker_id: &str, local_target_path: &Option<PathBuf>) -> Result<LocalMapping> {
+fn load_local_targets(
+    broker_id: &str,
+    local_target_path: &Option<PathBuf>,
+) -> Result<LocalMapping> {
     if let Some(json_file) = local_target_path {
         if json_file.exists() {
             let json_string = std::fs::read_to_string(json_file)?;
-            return Ok(LocalMapping{entries:serde_json::from_str(&json_string)?});
+            return Ok(LocalMapping {
+                entries: serde_json::from_str(&json_string)?,
+            });
         }
     }
     Ok(example_targets::example_local(broker_id))
 }
 
-async fn load_public_targets(client: &Client, url: &PathOrUri) -> Result<CentralMapping, BeamConnectError> {
+async fn load_public_targets(
+    client: &Client,
+    url: &PathOrUri,
+) -> Result<CentralMapping, BeamConnectError> {
     match url {
-        PathOrUri::Path(path) => {
-            serde_json::from_slice(&std::fs::read(path).map_err(|e| BeamConnectError::ConfigurationError(format!("Failed to open central config file: {e}")))?)
-        },
-        PathOrUri::Uri(url) => {
-            Ok(client.get(url.to_string())
-                .send().await
-                .map_err(|e| BeamConnectError::ConfigurationError(format!("Cannot retrieve central service discovery configuration: {e}")))?
-                .json()
-                .await
-                .map_err(|e| BeamConnectError::ConfigurationError(format!("Invalid central site discovery response: {e}")))?
-            )
-        },
-    }.map_err(|e| BeamConnectError::ConfigurationError(format!("Cannot parse central service discovery configuration: {e}")))
+        PathOrUri::Path(path) => serde_json::from_slice(&std::fs::read(path).map_err(|e| {
+            BeamConnectError::ConfigurationError(format!("Failed to open central config file: {e}"))
+        })?),
+        PathOrUri::Uri(url) => Ok(client
+            .get(url.to_string())
+            .send()
+            .await
+            .map_err(|e| {
+                BeamConnectError::ConfigurationError(format!(
+                    "Cannot retrieve central service discovery configuration: {e}"
+                ))
+            })?
+            .json()
+            .await
+            .map_err(|e| {
+                BeamConnectError::ConfigurationError(format!(
+                    "Invalid central site discovery response: {e}"
+                ))
+            })?),
+    }
+    .map_err(|e| {
+        BeamConnectError::ConfigurationError(format!(
+            "Cannot parse central service discovery configuration: {e}"
+        ))
+    })
 }
 
 fn build_client(tls_cert_dir: Option<&PathBuf>) -> Result<Client> {
@@ -248,7 +301,7 @@ fn build_client(tls_cert_dir: Option<&PathBuf>) -> Result<Client> {
                     Err(e) => {
                         warn!("Failed to read cert at {path_buf:?}: {e}");
                         continue;
-                    },
+                    }
                 };
                 client_builder = client_builder.add_root_certificate(cert);
             }
@@ -260,13 +313,12 @@ fn build_client(tls_cert_dir: Option<&PathBuf>) -> Result<Client> {
 impl Config {
     pub(crate) async fn load() -> Result<Self> {
         let args = CliArgs::parse();
-        let broker_id = args.app_id
-            .splitn(3, '.')
-            .last()
-            .ok_or_else(|| BeamConnectError::ConfigurationError(format!("Invalid beam id: {}", args.app_id)))?;
+        let broker_id = args.app_id.splitn(3, '.').last().ok_or_else(|| {
+            BeamConnectError::ConfigurationError(format!("Invalid beam id: {}", args.app_id))
+        })?;
         set_broker_id(broker_id.to_owned());
         let app_id = AppId::new(&args.app_id)?;
-    
+
         let expire = args.expire;
         let client = build_client(args.tls_ca_certificates_dir.as_ref())?;
 
@@ -276,10 +328,12 @@ impl Config {
         let identity = Identity::from_pkcs8(
             read_to_string(args.ssl_cert_pem)?.as_bytes(),
             read_to_string(args.ssl_cert_key)?.as_bytes(),
-        ).expect("Failed to initialize identity for tls acceptor");
-        let tls_acceptor = Arc::new(native_tls::TlsAcceptor::new(identity)
-            .expect("Failed to initialize tls acceptor")
-            .into()
+        )
+        .expect("Failed to initialize identity for tls acceptor");
+        let tls_acceptor = Arc::new(
+            native_tls::TlsAcceptor::new(identity)
+                .expect("Failed to initialize tls acceptor")
+                .into(),
         );
 
         Ok(Config {
@@ -292,15 +346,15 @@ impl Config {
             targets_public,
             expire,
             client,
-            tls_acceptor
+            tls_acceptor,
         })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use beam_lib::set_broker_id;
     use beam_lib::AppId;
+    use beam_lib::set_broker_id;
 
     use super::CentralMapping;
     use super::LocalMapping;
@@ -343,16 +397,22 @@ mod tests {
 
         let site = routes.next().unwrap();
         assert_eq!(site.virtualhost.to_string(), "ukt.virtual");
-        assert_eq!(site.beamconnect.to_string(), "connect.ukt-proxy.broker.ccp-it.dktk.dkfz.de");
+        assert_eq!(
+            site.beamconnect.to_string(),
+            "connect.ukt-proxy.broker.ccp-it.dktk.dkfz.de"
+        );
 
         let site = routes.next().unwrap();
         assert_eq!(site.virtualhost, "ukfr.virtual");
-        assert_eq!(site.beamconnect.to_string(), "connect.ukfr-proxy.broker.ccp-it.dktk.dkfz.de");
+        assert_eq!(
+            site.beamconnect.to_string(),
+            "connect.ukfr-proxy.broker.ccp-it.dktk.dkfz.de"
+        );
     }
 
     #[test]
     fn local_target_configuration() {
-        let broker_id = "broker.ccp-it.dktk.dkfz.de"; 
+        let broker_id = "broker.ccp-it.dktk.dkfz.de";
         set_broker_id(broker_id.to_owned());
         let serialized = r#"[
             {"external": "ifconfig.me","internal":"ifconfig.me/asdf","allowed":["connect1.proxy23.broker.ccp-it.dktk.dkfz.de","connect2.proxy23.broker.ccp-it.dktk.dkfz.de"]},
@@ -360,15 +420,23 @@ mod tests {
             {"external": "wttr.in","internal":"wttr.in","allowed":["connect1.proxy23.broker.ccp-it.dktk.dkfz.de","connect2.proxy23.broker.ccp-it.dktk.dkfz.de"]},
             {"external": "node23.uk12.network","internal":"host23.internal.network","allowed":["proxy23.broker.ccp-it.dktk.dkfz.de"]}
         ]"#;
-        let obj: LocalMapping = LocalMapping{entries:serde_json::from_str(serialized).unwrap()};
+        let obj: LocalMapping = LocalMapping {
+            entries: serde_json::from_str(serialized).unwrap(),
+        };
         let expect = example_local(&broker_id);
         assert_eq!(obj.entries.len(), expect.entries.len());
-        assert!(obj.get(&hyper::Uri::from_static("http://node23.uk12.network")).unwrap().can_be_accessed_by(&AppId::new("foobar.proxy23.broker.ccp-it.dktk.dkfz.de").unwrap()));
+        assert!(
+            obj.get(&hyper::Uri::from_static("http://node23.uk12.network"))
+                .unwrap()
+                .can_be_accessed_by(
+                    &AppId::new("foobar.proxy23.broker.ccp-it.dktk.dkfz.de").unwrap()
+                )
+        );
 
-        for (entry,ref_entry) in obj.entries.iter().zip(expect.entries.iter()) {
-            assert_eq!(entry.needle,ref_entry.needle);
-            assert_eq!(entry.replace,ref_entry.replace);
-            assert_eq!(entry.allowed,ref_entry.allowed);
+        for (entry, ref_entry) in obj.entries.iter().zip(expect.entries.iter()) {
+            assert_eq!(entry.needle, ref_entry.needle);
+            assert_eq!(entry.replace, ref_entry.replace);
+            assert_eq!(entry.allowed, ref_entry.allowed);
         }
     }
 }

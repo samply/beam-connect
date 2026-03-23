@@ -2,8 +2,15 @@ use std::{convert::Infallible, time::Duration};
 
 use config::Config;
 use http_body_util::combinators::BoxBody;
-use hyper::{body::{Bytes, Incoming}, service::service_fn, Method, Request};
-use hyper_util::{rt::{TokioExecutor, TokioIo}, server};
+use hyper::{
+    Method, Request,
+    body::{Bytes, Incoming},
+    service::service_fn,
+};
+use hyper_util::{
+    rt::{TokioExecutor, TokioIo},
+    server,
+};
 use logic_ask::handler_http;
 use tokio::{net::TcpListener, task::JoinHandle, time::Instant};
 use tracing::{debug, error, info, warn};
@@ -11,21 +18,29 @@ use tracing_subscriber::{EnvFilter, filter::LevelFilter};
 
 use crate::errors::BeamConnectError;
 
-mod shutdown;
-mod msg;
-mod example_targets;
+mod banner;
 mod config;
 mod errors;
-mod structs;
+mod example_targets;
 mod logic_ask;
 mod logic_reply;
-mod banner;
+mod msg;
+mod shutdown;
 #[cfg(feature = "sockets")]
 mod sockets;
+mod structs;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing::subscriber::set_global_default(tracing_subscriber::fmt().with_env_filter(EnvFilter::builder().with_default_directive(LevelFilter::INFO.into()).from_env_lossy()).finish())?;
+    tracing::subscriber::set_global_default(
+        tracing_subscriber::fmt()
+            .with_env_filter(
+                EnvFilter::builder()
+                    .with_default_directive(LevelFilter::INFO.into())
+                    .from_env_lossy(),
+            )
+            .finish(),
+    )?;
     banner::print_banner();
     let config = Config::load().await?;
     let config: &'static _ = Box::leak(Box::new(config));
@@ -34,14 +49,13 @@ async fn main() -> anyhow::Result<()> {
     info!("Global site discovery: {:?}", config.targets_public);
     info!("Local site Access: {:?}", config.targets_local);
 
-
     let http_executor = tokio::task::spawn(async move {
         if config.targets_local.entries.is_empty() {
             info!("No local targets configured, will not poll for tasks.");
             return;
         };
         let mut tries = 0_u32;
-        let mut timer= std::pin::pin!(tokio::time::sleep(Duration::from_secs(60)));
+        let mut timer = std::pin::pin!(tokio::time::sleep(Duration::from_secs(60)));
         loop {
             debug!("Waiting for next request ...");
             if let Err(e) = logic_reply::process_requests(config).await {
@@ -49,12 +63,12 @@ async fn main() -> anyhow::Result<()> {
                     BeamConnectError::ProxyTimeoutError => (),
                     BeamConnectError::ProxyRejectedAuthorization => {
                         error!("Stopping task polling: {e}");
-                        break
+                        break;
                     }
                     _ if tries < 10 => {
                         tries += 1;
                         warn!("Error in processing request: {e}. Will continue with the next one.");
-                    },
+                    }
                     _ => {
                         warn!("Failed to process requests: {e}. Retrying in 30s.");
                         tokio::time::sleep(Duration::from_secs(30)).await;
@@ -63,7 +77,9 @@ async fn main() -> anyhow::Result<()> {
             }
             if timer.is_elapsed() {
                 tries = tries.saturating_sub(2);
-                timer.as_mut().reset(Instant::now() + Duration::from_secs(60));
+                timer
+                    .as_mut()
+                    .reset(Instant::now() + Duration::from_secs(60));
             }
         }
     });
@@ -149,23 +165,33 @@ pub(crate) async fn handler_http_wrapper(
             let authority = req.uri().authority().cloned();
             match hyper::upgrade::on(req).await {
                 Ok(connection) => {
-                    let tls_connection = match config.tls_acceptor.accept(TokioIo::new(connection)).await {
-                        Err(e) => {
-                            warn!("Error accepting tls connection: {e}");
-                            return;
-                        },
-                        Ok(s) => s,
-                    };
-                    server::conn::auto::Builder::new(TokioExecutor::new()).serve_connection_with_upgrades(TokioIo::new(tls_connection), service_fn(|req| {
-                        let authority = authority.clone();
-                        async move {
-                            match handler_http(req, config, authority).await {
-                                Ok(e) => Ok::<_, Infallible>(e),
-                                Err(e) => Ok(Response::builder().status(e.code).body(BoxBody::default()).unwrap()),
+                    let tls_connection =
+                        match config.tls_acceptor.accept(TokioIo::new(connection)).await {
+                            Err(e) => {
+                                warn!("Error accepting tls connection: {e}");
+                                return;
                             }
-                        }
-                    })).await.unwrap_or_else(|e| warn!("Failed to handle upgraded connection: {e}"));
-                },
+                            Ok(s) => s,
+                        };
+                    server::conn::auto::Builder::new(TokioExecutor::new())
+                        .serve_connection_with_upgrades(
+                            TokioIo::new(tls_connection),
+                            service_fn(|req| {
+                                let authority = authority.clone();
+                                async move {
+                                    match handler_http(req, config, authority).await {
+                                        Ok(e) => Ok::<_, Infallible>(e),
+                                        Err(e) => Ok(Response::builder()
+                                            .status(e.code)
+                                            .body(BoxBody::default())
+                                            .unwrap()),
+                                    }
+                                }
+                            }),
+                        )
+                        .await
+                        .unwrap_or_else(|e| warn!("Failed to handle upgraded connection: {e}"));
+                }
                 Err(e) => warn!("Failed to upgrade connection: {e}"),
             };
         });
@@ -173,8 +199,10 @@ pub(crate) async fn handler_http_wrapper(
     } else {
         match handler_http(req, config, None).await {
             Ok(e) => Ok(e),
-            Err(e) => Ok(Response::builder().status(e.code).body(BoxBody::default()).unwrap()),
+            Err(e) => Ok(Response::builder()
+                .status(e.code)
+                .body(BoxBody::default())
+                .unwrap()),
         }
     }
-
 }

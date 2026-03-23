@@ -1,10 +1,10 @@
 use std::string::FromUtf8Error;
 
-use hyper::Uri;
 use beam_lib::AppOrProxyId;
+use hyper::Uri;
 use thiserror::Error;
 
-#[derive(Error,Debug)]
+#[derive(Error, Debug)]
 pub(crate) enum BeamConnectError {
     #[error("Regular proxy timeout")]
     ProxyTimeoutError,
@@ -31,8 +31,6 @@ pub(crate) enum BeamConnectError {
     #[error("Reply invalid: {0}")]
     ReplyInvalid(String),
     #[error("Configuration error: {0}")]
-    ConfigurationError(String)
-    // #[error("Unable to build reply: {0}")]
-    // BuildReplyFailed(hyper::http::Error)
+    ConfigurationError(String), // #[error("Unable to build reply: {0}")]
+                                // BuildReplyFailed(hyper::http::Error)
 }
-
