@@ -18,6 +18,21 @@ pub static TEST_CLIENT: Lazy<Client> = Lazy::new(|| {
         .unwrap()
 });
 
+#[cfg(feature = "sockets")]
+pub static TEST_CLIENT_SOCKET_PROXY: Lazy<Client> = Lazy::new(|| {
+    Client::builder()
+        .danger_accept_invalid_certs(true)
+        .proxy(
+            Proxy::all("http://localhost:8063")
+                .unwrap()
+                .custom_http_auth(HeaderValue::from_static(
+                    "ApiKey app2.proxy2.broker App1Secret"
+                )),
+        )
+        .build()
+        .unwrap()
+});
+
 #[macro_export]
 macro_rules! test_http_and_https {
     ($name:ident) => {

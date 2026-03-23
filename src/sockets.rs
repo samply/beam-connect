@@ -13,7 +13,7 @@ use hyper::{
 };
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use reqwest::Response;
-use tokio::{io::AsyncWriteExt, task::JoinHandle};
+use tokio::{io::AsyncWriteExt, net::TcpStream, task::JoinHandle};
 use tracing::{debug, error, info, warn};
 
 use crate::{config::Config, errors::BeamConnectError, structs::MyStatusCode};
@@ -153,6 +153,22 @@ async fn execute_http_task(
         warn!("App {app} not authorized to access url {uri}");
         return Err(StatusCode::UNAUTHORIZED);
     };
+    if req.method() == hyper::Method::CONNECT {
+        let dst = match TcpStream::connect((
+            target.replace.authority.host(),
+            target.replace.authority.port_u16().unwrap_or(443),
+        ))
+        .await
+        {
+            Ok(dst) => dst,
+            Err(e) => {
+                warn!("Failed to connect to target: {e}");
+                return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            }
+        };
+        tokio::spawn(forward_req_via_socket(req, dst));
+        return Ok(crate::Response::new(BoxBody::default()));
+    }
     *req.uri_mut() = {
         let mut parts = uri.to_owned().into_parts();
         if target.force_https {
@@ -282,11 +298,13 @@ pub(crate) async fn handle_via_sockets(
             warn!("Error doing handshake with proxy: {e}");
             StatusCode::BAD_GATEWAY
         })?;
-    let req_upgrade = if req.headers().contains_key(header::UPGRADE) {
-        req.extensions_mut().remove::<OnUpgrade>()
-    } else {
-        None
-    };
+    // Upgrade on either http connection upgrades like websockets or CONNECT requests
+    let req_upgrade =
+        if req.headers().contains_key(header::UPGRADE) || req.method() == hyper::Method::CONNECT {
+            Some(hyper::upgrade::on(&mut req))
+        } else {
+            None
+        };
     let resp_future = sender.send_request(req);
     let resp = if let Some(upgrade) = req_upgrade {
         let (resp, proxy_connection) = tokio::join!(resp_future, proxy_conn.without_shutdown());
@@ -325,4 +343,17 @@ pub(crate) async fn handle_via_sockets(
         StatusCode::BAD_GATEWAY
     })?;
     Ok(resp.map(|b| BoxBody::new(b.map_err(Into::into))))
+}
+
+async fn forward_req_via_socket(req: Request<Incoming>, mut dst: TcpStream) {
+    let conn = match hyper::upgrade::on(req).await {
+        Ok(conn) => conn,
+        Err(e) => {
+            warn!("Failed to upgrade connection: {e}");
+            return;
+        }
+    };
+    if let Err(e) = tokio::io::copy_bidirectional(&mut TokioIo::new(conn), &mut dst).await {
+        warn!("Error relaying connection from client to proxy: {e}");
+    }
 }

@@ -8,17 +8,13 @@ ARG TARGETARCH
 COPY /artifacts/binaries-$TARGETARCH$FEATURE/beam-connect /app/
 RUN chmod +x /app/*
 
-# FROM ${IMGNAME}
 FROM ubuntu:latest
 RUN apt update
-RUN apt install -y ca-certificates
-RUN apt install -y ssl-cert
-RUN make-ssl-cert generate-default-snakeoil
-#ARG COMPONENT
-ARG TARGETARCH
-#COPY /artifacts/binaries-$TARGETARCH/$COMPONENT /usr/local/bin/
-COPY --from=chmodder /app/* /usr/local/bin/
-#ENTRYPOINT [ "/usr/local/bin/$COMPONENT" ]
-ENTRYPOINT [ "/usr/local/bin/beam-connect" ]
-# ENTRYPOINT ["tail", "-f", "/dev/null"]
+RUN apt install -y ca-certificates ssl-cert
 
+RUN make-ssl-cert generate-default-snakeoil
+ENV SSL_CERT_PEM=/etc/ssl/certs/ssl-cert-snakeoil.pem
+ENV SSL_CERT_KEY=/etc/ssl/private/ssl-cert-snakeoil.key
+
+COPY --from=chmodder /app/* /usr/local/bin/
+ENTRYPOINT [ "/usr/local/bin/beam-connect" ]

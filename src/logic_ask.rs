@@ -97,10 +97,14 @@ pub(crate) async fn handler_http(
     *req.uri_mut() = {
         let mut parts = req.uri().to_owned().into_parts();
         parts.authority = Some(authority.clone());
-        if https_authority.is_some() {
-            parts.scheme = Some(Scheme::HTTPS);
-        } else {
-            parts.scheme = Some(Scheme::HTTP);
+        // CONNECT requests don't have a scheme
+        if req.method() != hyper::Method::CONNECT {
+            // If this is set it means we came from a tls terminated request which means the client executing the request should use https
+            if https_authority.is_some() {
+                parts.scheme = Some(Scheme::HTTPS);
+            } else {
+                parts.scheme = Some(Scheme::HTTP);
+            }
         }
         Uri::from_parts(parts).map_err(|e| {
             warn!("Could not transform uri authority: {e}");
@@ -125,6 +129,10 @@ async fn handle_via_tasks(
     target: &AppId,
     auth: HeaderValue,
 ) -> Result<Response, MyStatusCode> {
+    if req.method() == hyper::Method::CONNECT {
+        warn!("Forwarding of CONNECT requests is only supported with the 'sockets' feature");
+        return Err(StatusCode::NOT_IMPLEMENTED.into());
+    }
     let msg = http_req_to_struct(req, &config.my_app_id, &target, config.expire).await?;
 
     // Send to Proxy
