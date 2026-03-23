@@ -147,7 +147,7 @@ mod socket_tests {
         tungstenite::{Message, protocol::Role},
     };
 
-    use crate::common::TEST_CLIENT;
+    use crate::common::{TEST_CLIENT, TEST_CLIENT_SOCKET_PROXY};
 
     #[tokio::test]
     pub async fn test_ws() {
@@ -171,5 +171,20 @@ mod socket_tests {
         let res = stream.next().await.unwrap().unwrap();
         assert_eq!(res, Message::Text("Hello World".to_string().into()));
         stream.close(None).await.unwrap();
+    }
+
+    #[tokio::test]
+    pub async fn test_connect() -> anyhow::Result<()> {
+        let resp = TEST_CLIENT_SOCKET_PROXY
+            .get(format!("https://echo-get/get"))
+            .body("test")
+            .send()
+            .await?
+            .json::<serde_json::Value>()
+            .await?;
+        assert_eq!(resp["body"].as_str(), Some("test"));
+        assert_eq!(resp["path"].as_str(), Some("/get"));
+        assert_eq!(resp["protocol"].as_str(), Some("https"));
+        Ok(())
     }
 }

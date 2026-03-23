@@ -78,22 +78,12 @@ struct CliArgs {
     tls_ca_certificates_dir: Option<PathBuf>,
 
     /// Pem file used for ssl support. Will use a snakeoil pem if unset.
-    #[clap(
-        long,
-        env,
-        value_parser,
-        default_value = "/etc/ssl/certs/ssl-cert-snakeoil.pem"
-    )]
-    ssl_cert_pem: PathBuf,
+    #[clap(long, env, value_parser)]
+    ssl_cert_pem: Option<String>,
 
     /// Key file used for ssl support. Will use a snakeoil key if unset.
-    #[clap(
-        long,
-        env,
-        value_parser,
-        default_value = "/etc/ssl/private/ssl-cert-snakeoil.key"
-    )]
-    ssl_cert_key: PathBuf,
+    #[clap(long, env, value_parser)]
+    ssl_cert_key: Option<String>,
 
     /// Expiry time of the request in seconds
     #[clap(long, env, value_parser, default_value = "3600")]
@@ -237,7 +227,7 @@ pub(crate) struct Config {
     pub(crate) targets_public: CentralMapping,
     pub(crate) expire: u64,
     pub(crate) client: Client,
-    pub(crate) tls_acceptor: Arc<TlsAcceptor>,
+    pub(crate) tls_acceptor: Option<Arc<TlsAcceptor>>,
     pub(crate) no_auth: bool,
 }
 
@@ -288,6 +278,29 @@ async fn load_public_targets(
     })
 }
 
+fn build_tls_config(
+    ssl_cert_pem: Option<&String>,
+    ssl_cert_key: Option<&String>,
+) -> Result<Option<Arc<TlsAcceptor>>> {
+    match (
+        ssl_cert_pem.filter(|p| !p.is_empty()),
+        ssl_cert_key.filter(|k| !k.is_empty()),
+    ) {
+        (Some(pem), Some(key)) => {
+            let identity = Identity::from_pkcs8(
+                read_to_string(pem)?.as_bytes(),
+                read_to_string(key)?.as_bytes(),
+            )?;
+            let tls_acceptor = Arc::new(native_tls::TlsAcceptor::new(identity)?.into());
+            Ok(Some(tls_acceptor))
+        }
+        (Some(_), None) | (None, Some(_)) => {
+            anyhow::bail!("SSL certificate PEM and key must both be provided")
+        }
+        _ => Ok(None),
+    }
+}
+
 fn build_client(tls_cert_dir: Option<&PathBuf>) -> Result<Client> {
     let mut client_builder = Client::builder();
     if let Some(tls_ca_dir) = tls_cert_dir {
@@ -324,17 +337,8 @@ impl Config {
 
         let targets_public = load_public_targets(&client, &args.discovery_url).await?;
         let targets_local = load_local_targets(&broker_id, &args.local_targets_file)?;
-
-        let identity = Identity::from_pkcs8(
-            read_to_string(args.ssl_cert_pem)?.as_bytes(),
-            read_to_string(args.ssl_cert_key)?.as_bytes(),
-        )
-        .expect("Failed to initialize identity for tls acceptor");
-        let tls_acceptor = Arc::new(
-            native_tls::TlsAcceptor::new(identity)
-                .expect("Failed to initialize tls acceptor")
-                .into(),
-        );
+        let tls_acceptor =
+            build_tls_config(args.ssl_cert_pem.as_ref(), args.ssl_cert_key.as_ref())?;
 
         Ok(Config {
             proxy_url: args.proxy_url,

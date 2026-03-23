@@ -160,19 +160,20 @@ pub(crate) async fn handler_http_wrapper(
     config: &'static Config,
 ) -> Result<Response, Infallible> {
     // On https connections we want to emulate that we successfully connected to get the actual http request
-    if req.method() == Method::CONNECT {
+    if req.method() == Method::CONNECT
+        && let Some(tls_acceptor) = &config.tls_acceptor
+    {
         tokio::spawn(async move {
             let authority = req.uri().authority().cloned();
             match hyper::upgrade::on(req).await {
                 Ok(connection) => {
-                    let tls_connection =
-                        match config.tls_acceptor.accept(TokioIo::new(connection)).await {
-                            Err(e) => {
-                                warn!("Error accepting tls connection: {e}");
-                                return;
-                            }
-                            Ok(s) => s,
-                        };
+                    let tls_connection = match tls_acceptor.accept(TokioIo::new(connection)).await {
+                        Ok(s) => s,
+                        Err(e) => {
+                            warn!("Error accepting tls connection: {e}");
+                            return;
+                        }
+                    };
                     server::conn::auto::Builder::new(TokioExecutor::new())
                         .serve_connection_with_upgrades(
                             TokioIo::new(tls_connection),
