@@ -1,6 +1,5 @@
-
+use hyper::{HeaderMap, header, http::HeaderValue};
 use once_cell::sync::Lazy;
-use hyper::{header, http::HeaderValue, HeaderMap};
 use reqwest::{Client, Proxy};
 
 pub static TEST_CLIENT: Lazy<Client> = Lazy::new(|| {
@@ -9,7 +8,10 @@ pub static TEST_CLIENT: Lazy<Client> = Lazy::new(|| {
         .proxy(Proxy::all("http://localhost:8062").unwrap())
         .default_headers({
             let mut headers = HeaderMap::new();
-            headers.append(header::PROXY_AUTHORIZATION, HeaderValue::from_static("ApiKey app1.proxy1.broker App1Secret"));
+            headers.append(
+                header::PROXY_AUTHORIZATION,
+                HeaderValue::from_static("ApiKey app1.proxy1.broker App1Secret"),
+            );
             headers
         })
         .build()

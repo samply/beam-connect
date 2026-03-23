@@ -2,7 +2,7 @@ use tracing::info;
 
 #[cfg(unix)]
 pub async fn wait_for_signal() {
-    use tokio::signal::unix::{signal, SignalKind};
+    use tokio::signal::unix::{SignalKind, signal};
     let mut sigterm = signal(SignalKind::terminate())
         .expect("Unable to register shutdown handler; are you running a Unix-based OS?");
     let mut sigint = signal(SignalKind::interrupt())
