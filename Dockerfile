@@ -13,8 +13,8 @@ RUN apt update
 RUN apt install -y ca-certificates ssl-cert
 
 RUN make-ssl-cert generate-default-snakeoil
-ENV SSL_CERT_PEM=/etc/ssl/certs/ssl-cert-snakeoil.pem
-ENV SSL_CERT_KEY=/etc/ssl/private/ssl-cert-snakeoil.key
+ENV TLS_TERMINATION_CERT_PATH=/etc/ssl/certs/ssl-cert-snakeoil.pem
+ENV TLS_TERMINATION_KEY_PATH=/etc/ssl/private/ssl-cert-snakeoil.key
 
 COPY --from=chmodder /app/* /usr/local/bin/
 ENTRYPOINT [ "/usr/local/bin/beam-connect" ]

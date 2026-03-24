@@ -80,8 +80,8 @@ services:
      RUST_LOG: ${RUST_LOG}
      no_proxy: proxy2,my.example.com
      TLS_CA_CERTIFICATES_DIR: /custom-cert
-     SSL_CERT_PEM: ""
-     SSL_CERT_KEY: ""
+     TLS_TERMINATION_CERT_PATH: ""
+     TLS_TERMINATION_KEY_PATH: ""
   proxy2:
     depends_on: [broker]
     image: samply/beam-proxy:${TAG}
