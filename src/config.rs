@@ -77,13 +77,13 @@ struct CliArgs {
     #[clap(long, env, value_parser)]
     tls_ca_certificates_dir: Option<PathBuf>,
 
-    /// Pem file used for ssl support. Will use a snakeoil pem if unset.
+    /// Pem file used for tls termination (e.g. the server certificate).
     #[clap(long, env, value_parser)]
-    ssl_cert_pem: Option<String>,
+    tls_termination_cert_path: Option<String>,
 
-    /// Key file used for ssl support. Will use a snakeoil key if unset.
+    /// Key file used for tls termination (e.g. the server key).
     #[clap(long, env, value_parser)]
-    ssl_cert_key: Option<String>,
+    tls_termination_key_path: Option<String>,
 
     /// Expiry time of the request in seconds
     #[clap(long, env, value_parser, default_value = "3600")]
@@ -337,8 +337,10 @@ impl Config {
 
         let targets_public = load_public_targets(&client, &args.discovery_url).await?;
         let targets_local = load_local_targets(&broker_id, &args.local_targets_file)?;
-        let tls_acceptor =
-            build_tls_config(args.ssl_cert_pem.as_ref(), args.ssl_cert_key.as_ref())?;
+        let tls_acceptor = build_tls_config(
+            args.tls_termination_cert_path.as_ref(),
+            args.tls_termination_key_path.as_ref(),
+        )?;
 
         Ok(Config {
             proxy_url: args.proxy_url,
