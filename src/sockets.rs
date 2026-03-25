@@ -13,51 +13,49 @@ use hyper::{
 };
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use reqwest::Response;
-use tokio::{io::AsyncWriteExt, net::TcpStream, task::JoinHandle};
+use tokio::{io::AsyncWriteExt, net::TcpStream};
 use tracing::{debug, error, info, warn};
 
 use crate::{config::Config, errors::BeamConnectError, structs::MyStatusCode};
 
-pub(crate) fn spawn_socket_task_poller(config: &'static Config) -> JoinHandle<()> {
-    tokio::spawn(async move {
-        use BeamConnectError::*;
-        let mut seen: HashSet<MsgId> = HashSet::new();
+pub(crate) async fn socket_task_poller(config: &'static Config) {
+    use BeamConnectError::*;
+    let mut seen: HashSet<MsgId> = HashSet::new();
 
-        loop {
-            let tasks = match poll_socket_task(&config).await {
-                Ok(tasks) => tasks,
-                Err(HyperBuildError(e)) => {
-                    error!("{e}");
-                    error!("This is most likely caused by wrong configuration");
-                    break;
-                }
-                Err(ProxyTimeoutError) => continue,
-                Err(e) => {
-                    warn!("Error during socket task polling: {e}");
-                    tokio::time::sleep(Duration::from_secs(10)).await;
-                    continue;
-                }
-            };
-            for task in tasks {
-                if seen.contains(&task.id) {
-                    continue;
-                }
-                seen.insert(task.id.clone());
-                let AppOrProxyId::App(client) = task.from else {
-                    warn!("Invalid app id skipping");
-                    continue;
-                };
-                tokio::spawn(async move {
-                    match connect_proxy(&task.id, config).await {
-                        Ok(resp) => tunnel(resp, client, config).await,
-                        Err(e) => {
-                            warn!("{e}");
-                        }
-                    };
-                });
+    loop {
+        let tasks = match poll_socket_task(&config).await {
+            Ok(tasks) => tasks,
+            Err(HyperBuildError(e)) => {
+                error!("{e}");
+                error!("This is most likely caused by wrong configuration");
+                break;
             }
+            Err(ProxyTimeoutError) => continue,
+            Err(e) => {
+                warn!("Error during socket task polling: {e}");
+                tokio::time::sleep(Duration::from_secs(10)).await;
+                continue;
+            }
+        };
+        for task in tasks {
+            if seen.contains(&task.id) {
+                continue;
+            }
+            seen.insert(task.id.clone());
+            let AppOrProxyId::App(client) = task.from else {
+                warn!("Invalid app id skipping");
+                continue;
+            };
+            tokio::spawn(async move {
+                match connect_proxy(&task.id, config).await {
+                    Ok(resp) => tunnel(resp, client, config).await,
+                    Err(e) => {
+                        warn!("{e}");
+                    }
+                };
+            });
         }
-    })
+    }
 }
 
 async fn poll_socket_task(config: &Config) -> Result<Vec<SocketTask>, BeamConnectError> {
