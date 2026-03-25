@@ -5,13 +5,45 @@ use futures_util::future::TryJoinAll;
 use hyper::{Method, StatusCode, Uri, header, http::uri::PathAndQuery};
 use reqwest::Response;
 use serde_json::Value;
-use tracing::{Instrument, Span, debug, field, info, trace, warn};
+use tokio::time::Instant;
+use tracing::{Instrument, Span, debug, error, field, info, trace, warn};
 
 use crate::{
     config::Config,
     errors::BeamConnectError,
     msg::{HttpRequest, HttpResponse},
 };
+
+pub async fn http_beam_task_executor(config: &'static Config) {
+    let mut tries = 0_u32;
+    let mut timer = std::pin::pin!(tokio::time::sleep(Duration::from_secs(60)));
+    loop {
+        debug!("Waiting for next request ...");
+        if let Err(e) = process_requests(config).await {
+            match e {
+                BeamConnectError::ProxyTimeoutError => (),
+                BeamConnectError::ProxyRejectedAuthorization => {
+                    error!("Stopping task polling: {e}");
+                    break;
+                }
+                _ if tries < 10 => {
+                    tries += 1;
+                    warn!("Error in processing request: {e}. Will continue with the next one.");
+                }
+                _ => {
+                    warn!("Failed to process requests: {e}. Retrying in 30s.");
+                    tokio::time::sleep(Duration::from_secs(30)).await;
+                }
+            }
+        }
+        if timer.is_elapsed() {
+            tries = tries.saturating_sub(2);
+            timer
+                .as_mut()
+                .reset(Instant::now() + Duration::from_secs(60));
+        }
+    }
+}
 
 pub(crate) async fn process_requests(config: &'static Config) -> Result<(), BeamConnectError> {
     // Fetch a batch of tasks and executed them in parallel

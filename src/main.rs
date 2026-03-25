@@ -12,11 +12,9 @@ use hyper_util::{
     server,
 };
 use logic_ask::handler_http;
-use tokio::{net::TcpListener, task::JoinHandle, time::Instant};
+use tokio::{net::TcpListener, task::JoinHandle};
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::{EnvFilter, filter::LevelFilter};
-
-use crate::errors::BeamConnectError;
 
 mod banner;
 mod config;
@@ -49,44 +47,14 @@ async fn main() -> anyhow::Result<()> {
     info!("Global site discovery: {:?}", config.targets_public);
     info!("Local site Access: {:?}", config.targets_local);
 
-    let http_executor = tokio::task::spawn(async move {
-        if config.targets_local.entries.is_empty() {
-            info!("No local targets configured, will not poll for tasks.");
-            return;
-        };
-        let mut tries = 0_u32;
-        let mut timer = std::pin::pin!(tokio::time::sleep(Duration::from_secs(60)));
-        loop {
-            debug!("Waiting for next request ...");
-            if let Err(e) = logic_reply::process_requests(config).await {
-                match e {
-                    BeamConnectError::ProxyTimeoutError => (),
-                    BeamConnectError::ProxyRejectedAuthorization => {
-                        error!("Stopping task polling: {e}");
-                        break;
-                    }
-                    _ if tries < 10 => {
-                        tries += 1;
-                        warn!("Error in processing request: {e}. Will continue with the next one.");
-                    }
-                    _ => {
-                        warn!("Failed to process requests: {e}. Retrying in 30s.");
-                        tokio::time::sleep(Duration::from_secs(30)).await;
-                    }
-                }
-            }
-            if timer.is_elapsed() {
-                tries = tries.saturating_sub(2);
-                timer
-                    .as_mut()
-                    .reset(Instant::now() + Duration::from_secs(60));
-            }
-        }
-    });
-    #[allow(unused_mut)]
-    let mut executers = vec![http_executor];
-    #[cfg(feature = "sockets")]
-    executers.push(sockets::spawn_socket_task_poller(config));
+    let mut executers = vec![];
+    if !config.targets_local.entries.is_empty() {
+        executers.push(tokio::spawn(logic_reply::http_beam_task_executor(config)));
+        #[cfg(feature = "sockets")]
+        executers.push(tokio::spawn(sockets::socket_task_poller(config)));
+    } else {
+        info!("No local targets configured, will not poll for tasks.");
+    };
 
     if let Err(e) = server(config).await {
         error!("Server error: {}", e);
