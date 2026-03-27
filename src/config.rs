@@ -148,7 +148,7 @@ pub(crate) struct LocalMappingEntry {
     pub(crate) needle: Authority, // Host part of URL
     #[serde(rename = "internal")]
     pub(crate) replace: AuthorityReplacement,
-    pub(crate) allowed: Vec<AppOrProxyId>,
+    pub(crate) allowed: Vec<AllowListEntry>,
     #[serde(default, rename = "forceHttps")]
     pub(crate) force_https: bool,
     #[serde(default, rename = "resetHost")]
@@ -176,8 +176,11 @@ where
 impl LocalMappingEntry {
     pub fn can_be_accessed_by(&self, who: &AppId) -> bool {
         self.allowed.iter().any(|id| match id {
-            AppOrProxyId::App(app) => app == who,
-            AppOrProxyId::Proxy(proxy) => who.as_ref().ends_with(proxy.as_ref()),
+            AllowListEntry::AppOrProxyId(AppOrProxyId::App(app)) => app == who,
+            AllowListEntry::AppOrProxyId(AppOrProxyId::Proxy(proxy)) => {
+                who.as_ref().ends_with(proxy.as_ref())
+            }
+            AllowListEntry::Glob(glob) => glob.matches(who.as_ref()),
         })
     }
 }
@@ -357,14 +360,61 @@ impl Config {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AllowListEntry {
+    Glob(glob::Pattern),
+    AppOrProxyId(AppOrProxyId),
+}
+
+impl<'de> serde::Deserialize<'de> for AllowListEntry {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        match AppOrProxyId::new(&s) {
+            Ok(id) => Ok(AllowListEntry::AppOrProxyId(id)),
+            Err(e) => match glob::Pattern::new(&s) {
+                Ok(p) => Ok(AllowListEntry::Glob(p)),
+                Err(e_glob) => Err(serde::de::Error::custom(format!(
+                    "Failed to parse allow list entry as either app or proxy id ({e:#}) nor as a glob pattern ({e_glob:#})"
+                ))),
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use beam_lib::AppId;
     use beam_lib::set_broker_id;
 
-    use super::CentralMapping;
-    use super::LocalMapping;
+    use super::*;
     use crate::example_targets::example_local;
+
+    #[test]
+    fn allow_list_entry_glob() {
+        set_broker_id("broker.ccp-it.dktk.dkfz.de".to_owned());
+        let [a, b, c]: [AllowListEntry; 3] = serde_json::from_value(serde_json::json!([
+            "*.broker.ccp-it.dktk.dkfz.de",
+            "a.broker.ccp-it.dktk.dkfz.de",
+            "a.a.broker.ccp-it.dktk.dkfz.de",
+        ]))
+        .unwrap();
+        let AllowListEntry::Glob(glob) = a else {
+            panic!("a is not a glob pattern")
+        };
+        assert!(glob.matches("asdf.broker.ccp-it.dktk.dkfz.de"));
+        assert!(!glob.matches("asdf.broker"));
+        assert!(matches!(
+            b,
+            AllowListEntry::AppOrProxyId(AppOrProxyId::Proxy(..))
+        ));
+        assert!(matches!(
+            c,
+            AllowListEntry::AppOrProxyId(AppOrProxyId::App(..))
+        ));
+    }
 
     #[test]
     fn serde_authority() {
