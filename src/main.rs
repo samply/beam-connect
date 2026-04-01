@@ -12,6 +12,7 @@ use hyper_util::{
     server,
 };
 use logic_ask::handler_http;
+use logic_reply::poller;
 use tokio::{net::TcpListener, task::JoinHandle};
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::{EnvFilter, filter::LevelFilter};
@@ -49,9 +50,13 @@ async fn main() -> anyhow::Result<()> {
 
     let mut executers = vec![];
     if !config.targets_local.entries.is_empty() {
-        executers.push(tokio::spawn(logic_reply::http_beam_task_executor(config)));
+        executers.push(tokio::spawn(poller(move || {
+            logic_reply::poll_and_execute_task(config)
+        })));
         #[cfg(feature = "sockets")]
-        executers.push(tokio::spawn(sockets::socket_task_poller(config)));
+        executers.push(tokio::spawn(poller(move || {
+            sockets::poll_and_execute_socket_task(config)
+        })));
     } else {
         info!("No local targets configured, will not poll for tasks.");
     };
