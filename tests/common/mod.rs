@@ -26,7 +26,7 @@ pub static TEST_CLIENT_SOCKET_PROXY: Lazy<Client> = Lazy::new(|| {
             Proxy::all("http://localhost:8063")
                 .unwrap()
                 .custom_http_auth(HeaderValue::from_static(
-                    "ApiKey app2.proxy2.broker App1Secret"
+                    "ApiKey app2.proxy2.broker App1Secret",
                 )),
         )
         .build()
