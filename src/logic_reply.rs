@@ -14,38 +14,43 @@ use crate::{
     msg::{HttpRequest, HttpResponse},
 };
 
-pub async fn http_beam_task_executor(config: &'static Config) {
+pub async fn poller<F, Fut>(f: F)
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = Result<(), BeamConnectError>>,
+{
     let mut tries = 0_u32;
-    let mut timer = std::pin::pin!(tokio::time::sleep(Duration::from_secs(60)));
+    let mut timer = Instant::now();
     loop {
         debug!("Waiting for next request ...");
-        if let Err(e) = process_requests(config).await {
-            match e {
-                BeamConnectError::ProxyTimeoutError => (),
-                BeamConnectError::ProxyRejectedAuthorization => {
-                    error!("Stopping task polling: {e}");
-                    break;
-                }
-                _ if tries < 10 => {
-                    tries += 1;
-                    warn!("Error in processing request: {e}. Will continue with the next one.");
-                }
-                _ => {
-                    warn!("Failed to process requests: {e}. Retrying in 30s.");
-                    tokio::time::sleep(Duration::from_secs(30)).await;
-                }
+        match f().await {
+            Ok(()) => (),
+            Err(BeamConnectError::ProxyReqwestError(e)) if e.is_connect() => {
+                info!("Trying to connect to beam-proxy. Retrying in 1s.");
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+            Err(BeamConnectError::ProxyTimeoutError) => tries += 1,
+            Err(e @ BeamConnectError::ProxyRejectedAuthorization) => {
+                error!("Stopping polling: {e}");
+                break;
+            }
+            Err(e) if tries < 10 => {
+                tries += 1;
+                warn!("Error while polling: {e}. Will continue with the next one.");
+            }
+            Err(e) => {
+                warn!("Error while polling: {e}. Retrying in 10s.");
+                tokio::time::sleep(Duration::from_secs(10)).await;
             }
         }
-        if timer.is_elapsed() {
+        if timer + Duration::from_secs(60) < Instant::now() {
             tries = tries.saturating_sub(2);
-            timer
-                .as_mut()
-                .reset(Instant::now() + Duration::from_secs(60));
+            timer = Instant::now();
         }
     }
 }
 
-pub(crate) async fn process_requests(config: &'static Config) -> Result<(), BeamConnectError> {
+pub(crate) async fn poll_and_execute_task(config: &'static Config) -> Result<(), BeamConnectError> {
     // Fetch a batch of tasks and executed them in parallel
     fetch_task(&config)
         .await?
@@ -263,7 +268,6 @@ async fn execute_http_task(
 
 async fn fetch_task(config: &Config) -> Result<Vec<TaskRequest<HttpRequest>>, BeamConnectError> {
     debug!("fetching requests from proxy");
-    let probably_timeout = tokio::time::sleep(Duration::from_secs(20));
     let resp = config
         .client
         .get(format!(
@@ -279,12 +283,10 @@ async fn fetch_task(config: &Config) -> Result<Vec<TaskRequest<HttpRequest>>, Be
         StatusCode::OK | StatusCode::PARTIAL_CONTENT => {
             trace!("Got tasks from beam: {resp:#?}");
         }
-        StatusCode::GATEWAY_TIMEOUT => return Err(BeamConnectError::ProxyTimeoutError),
-        StatusCode::UNAUTHORIZED => return Err(BeamConnectError::ProxyRejectedAuthorization),
-        s if probably_timeout.is_elapsed() => {
-            debug!("Request to proxy timed out with StatusCode {s}");
+        StatusCode::GATEWAY_TIMEOUT | StatusCode::BAD_GATEWAY => {
             return Err(BeamConnectError::ProxyTimeoutError);
         }
+        StatusCode::UNAUTHORIZED => return Err(BeamConnectError::ProxyRejectedAuthorization),
         _ => {
             return Err(BeamConnectError::ProxyOtherError(format!(
                 "Got response code {}",

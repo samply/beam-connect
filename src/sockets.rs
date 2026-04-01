@@ -1,4 +1,4 @@
-use std::{collections::HashSet, convert::Infallible, time::Duration};
+use std::{convert::Infallible, time::Duration};
 
 use beam_lib::{AppId, AppOrProxyId, MsgId, SocketTask};
 use futures_util::TryStreamExt;
@@ -18,44 +18,23 @@ use tracing::{debug, error, info, warn};
 
 use crate::{config::Config, errors::BeamConnectError, structs::MyStatusCode};
 
-pub(crate) async fn socket_task_poller(config: &'static Config) {
-    use BeamConnectError::*;
-    let mut seen: HashSet<MsgId> = HashSet::new();
-
-    loop {
-        let tasks = match poll_socket_task(&config).await {
-            Ok(tasks) => tasks,
-            Err(HyperBuildError(e)) => {
-                error!("{e}");
-                error!("This is most likely caused by wrong configuration");
-                break;
-            }
-            Err(ProxyTimeoutError) => continue,
-            Err(e) => {
-                warn!("Error during socket task polling: {e}");
-                tokio::time::sleep(Duration::from_secs(10)).await;
-                continue;
-            }
+pub(crate) async fn poll_and_execute_socket_task(
+    config: &'static Config,
+) -> Result<(), BeamConnectError> {
+    let tasks = poll_socket_task(config).await?;
+    for task in tasks {
+        let AppOrProxyId::App(client) = task.from else {
+            warn!("Invalid app id skipping");
+            return Err(BeamConnectError::ReplyInvalid(format!(
+                "Invalid app id: {:?}",
+                task.from
+            )));
         };
-        for task in tasks {
-            if seen.contains(&task.id) {
-                continue;
-            }
-            seen.insert(task.id.clone());
-            let AppOrProxyId::App(client) = task.from else {
-                warn!("Invalid app id skipping");
-                continue;
-            };
-            tokio::spawn(async move {
-                match connect_proxy(&task.id, config).await {
-                    Ok(resp) => tunnel(resp, client, config).await,
-                    Err(e) => {
-                        warn!("{e}");
-                    }
-                };
-            });
-        }
+        let resp = connect_proxy(&task.id, config).await?;
+        // After the connection is established we can polling again for new socket tasks.
+        tokio::spawn(tunnel(resp, client, config));
     }
+    Ok(())
 }
 
 async fn poll_socket_task(config: &Config) -> Result<Vec<SocketTask>, BeamConnectError> {
@@ -69,7 +48,12 @@ async fn poll_socket_task(config: &Config) -> Result<Vec<SocketTask>, BeamConnec
         .map_err(BeamConnectError::ProxyReqwestError)?;
     match resp.status() {
         StatusCode::OK => {}
-        StatusCode::GATEWAY_TIMEOUT => return Err(BeamConnectError::ProxyTimeoutError),
+        StatusCode::UNAUTHORIZED => {
+            return Err(BeamConnectError::ProxyRejectedAuthorization);
+        }
+        StatusCode::GATEWAY_TIMEOUT | StatusCode::BAD_GATEWAY => {
+            return Err(BeamConnectError::ProxyTimeoutError);
+        }
         e => {
             return Err(BeamConnectError::ProxyOtherError(format!(
                 "Unexpected status code {e}"
@@ -93,9 +77,7 @@ async fn connect_proxy(task_id: &MsgId, config: &Config) -> Result<Response, Bea
     let invalid_status_reason = match resp.status() {
         StatusCode::SWITCHING_PROTOCOLS => return Ok(resp),
         StatusCode::NOT_FOUND | StatusCode::GONE => "Task already expired".to_string(),
-        StatusCode::UNAUTHORIZED => {
-            "This socket is not for this authorized for this app".to_string()
-        }
+        StatusCode::UNAUTHORIZED => "This socket task is not authorized for this app".to_string(),
         other => other.to_string(),
     };
     Err(BeamConnectError::ProxyOtherError(invalid_status_reason))
@@ -107,7 +89,7 @@ fn status_to_response(status: StatusCode) -> crate::Response {
     res
 }
 
-async fn tunnel(proxy: Response, client: AppId, config: &Config) {
+async fn tunnel(proxy: Response, client: AppId, config: &'static Config) {
     let proxy = match proxy.upgrade().await {
         Ok(socket) => socket,
         Err(e) => {
@@ -119,11 +101,10 @@ async fn tunnel(proxy: Response, client: AppId, config: &Config) {
         .serve_connection_with_upgrades(
             TokioIo::new(proxy),
             service_fn(move |req| {
-                let client2 = client.clone();
-                let config2 = config.clone();
+                let client = client.clone();
                 async move {
                     Ok::<_, Infallible>(
-                        execute_http_task(req, &client2, &config2)
+                        execute_http_task(req, &client, config)
                             .await
                             .unwrap_or_else(status_to_response),
                     )
