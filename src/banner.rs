@@ -17,12 +17,12 @@ pub fn print_banner() {
     );
 }
 
-pub(crate) fn print_startup_app_config(config: &crate::Config) {
+pub(crate) async fn print_startup_app_config(config: &crate::Config) {
     info!(
         "Communicating with Proxy {} using AppId {}. There are {} entries in the local and {} entries in the central target configuration.",
         config.proxy_url,
         config.my_app_id,
         config.targets_local.entries.len(),
-        config.targets_public.sites.len()
+        config.targets_public.get(&config.client).await.sites.len()
     );
 }

@@ -25,7 +25,7 @@ pub(crate) async fn handler_http(
     config: &Config,
     https_authority: Option<Authority>,
 ) -> Result<Response, MyStatusCode> {
-    let targets = &config.targets_public;
+    let targets = &config.targets_public.get(&config.client).await;
     let method = req.method().to_owned();
     let uri = req.uri().to_owned();
 

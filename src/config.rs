@@ -3,15 +3,17 @@ use std::{
     path::PathBuf,
     str::FromStr,
     sync::Arc,
+    time::{Duration, Instant},
 };
 
 use anyhow::Result;
 use beam_lib::{AppId, AppOrProxyId, set_broker_id};
 use clap::Parser;
-use hyper::{Uri, http::uri::Authority};
+use hyper::{Uri, header, http::uri::Authority};
 use regex::Regex;
-use reqwest::{Certificate, Client};
+use reqwest::{Certificate, Client, Url};
 use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
 use tokio_native_tls::{
     TlsAcceptor,
     native_tls::{self, Identity},
@@ -219,6 +221,15 @@ impl<'de> Deserialize<'de> for AuthorityReplacement {
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum CentralTargetsKind {
+    Static(CentralMapping),
+    Dynamic {
+        fetch_url: Url,
+        prev: Arc<Mutex<(Instant, CentralMapping)>>,
+    },
+}
+
 #[derive(Clone)]
 #[allow(dead_code)]
 pub(crate) struct Config {
@@ -227,7 +238,7 @@ pub(crate) struct Config {
     pub(crate) proxy_auth: String,
     pub(crate) bind_addr: String,
     pub(crate) targets_local: LocalMapping,
-    pub(crate) targets_public: CentralMapping,
+    pub(crate) targets_public: CentralTargetsKind,
     pub(crate) expire: u64,
     pub(crate) client: Client,
     pub(crate) tls_acceptor: Option<Arc<TlsAcceptor>>,
@@ -249,36 +260,89 @@ fn load_local_targets(
     Ok(example_targets::example_local(broker_id))
 }
 
-async fn load_public_targets(
-    client: &Client,
-    url: &PathOrUri,
-) -> Result<CentralMapping, BeamConnectError> {
-    match url {
-        PathOrUri::Path(path) => serde_json::from_slice(&std::fs::read(path).map_err(|e| {
-            BeamConnectError::ConfigurationError(format!("Failed to open central config file: {e}"))
-        })?),
-        PathOrUri::Uri(url) => Ok(client
-            .get(url.to_string())
-            .send()
-            .await
+impl CentralTargetsKind {
+    async fn new(path_or_uri: &PathOrUri, client: &Client) -> Result<Self, BeamConnectError> {
+        match path_or_uri {
+            PathOrUri::Path(path) => serde_json::from_slice(&std::fs::read(path).map_err(|e| {
+                BeamConnectError::ConfigurationError(format!(
+                    "Failed to open central config file: {e}"
+                ))
+            })?)
             .map_err(|e| {
                 BeamConnectError::ConfigurationError(format!(
-                    "Cannot retrieve central service discovery configuration: {e}"
+                    "Failed to parse central config file: {e:#}"
                 ))
-            })?
-            .json()
+            })
+            .map(CentralTargetsKind::Static),
+            PathOrUri::Uri(url) => {
+                Self::fetch(client, &url.to_string())
+                    .await
+                    .map(|(cache_for, central_mapping)| CentralTargetsKind::Dynamic {
+                        fetch_url: url.to_string().parse().unwrap(),
+                        prev: Arc::new(Mutex::new((Instant::now() + cache_for, central_mapping))),
+                    })
+            }
+        }
+    }
+
+    async fn fetch(
+        client: &Client,
+        fetch_url: &str,
+    ) -> Result<(Duration, CentralMapping), BeamConnectError> {
+        let res = client.get(fetch_url).send().await.map_err(|e| {
+            BeamConnectError::ConfigurationError(format!(
+                "Cannot retrieve central service discovery configuration: {e}"
+            ))
+        })?;
+        let cache_for = res
+            .headers()
+            .get(header::CACHE_CONTROL)
+            .and_then(|h| {
+                h.to_str().ok()?.split(",").map(str::trim).find_map(|s| {
+                    s.strip_prefix("no-cache")
+                        .or(s.strip_prefix("no-store"))
+                        .map(|_| Duration::ZERO)
+                        .or_else(|| {
+                            s.strip_prefix("max-age=")?
+                                .parse::<u64>()
+                                .ok()
+                                .map(Duration::from_secs)
+                        })
+                })
+            })
+            .unwrap_or(Duration::from_hours(1));
+        res.json()
             .await
             .map_err(|e| {
                 BeamConnectError::ConfigurationError(format!(
                     "Invalid central site discovery response: {e}"
                 ))
-            })?),
+            })
+            .map(|targets| (cache_for, targets))
     }
-    .map_err(|e| {
-        BeamConnectError::ConfigurationError(format!(
-            "Cannot parse central service discovery configuration: {e}"
-        ))
-    })
+
+    pub async fn get(&self, client: &Client) -> CentralMapping {
+        match self {
+            CentralTargetsKind::Static(targets) => targets.clone(),
+            CentralTargetsKind::Dynamic { fetch_url, prev } => {
+                let mut prev = prev.lock().await;
+                if prev.0 < Instant::now() {
+                    let (cache_for, targets) = match Self::fetch(client, fetch_url.as_str()).await {
+                        Ok(res) => res,
+                        Err(e) => {
+                            tracing::warn!(
+                                "Failed to fetch central targets: {e:#}.\nUsing cached targets instead."
+                            );
+                            return prev.1.clone();
+                        }
+                    };
+                    *prev = (Instant::now() + cache_for, targets.clone());
+                    return targets;
+                }
+                prev.1.clone()
+            }
+        }
+    }
 }
 
 fn build_tls_config(
@@ -338,7 +402,7 @@ impl Config {
         let expire = args.expire;
         let client = build_client(args.tls_ca_certificates_dir.as_ref())?;
 
-        let targets_public = load_public_targets(&client, &args.discovery_url).await?;
+        let targets_public = CentralTargetsKind::new(&args.discovery_url, &client).await?;
         let targets_local = load_local_targets(&broker_id, &args.local_targets_file)?;
         let tls_acceptor = build_tls_config(
             args.tls_termination_cert_path.as_ref(),
