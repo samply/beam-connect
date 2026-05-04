@@ -43,7 +43,7 @@ async fn main() -> anyhow::Result<()> {
     banner::print_banner();
     let config = Config::load().await?;
     let config: &'static _ = Box::leak(Box::new(config));
-    banner::print_startup_app_config(&config);
+    banner::print_startup_app_config(&config).await;
 
     info!("Global site discovery: {:?}", config.targets_public);
     info!("Local site Access: {:?}", config.targets_local);
