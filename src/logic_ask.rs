@@ -80,23 +80,21 @@ pub(crate) async fn handler_http(
     //     return Err(StatusCode::CONFLICT.into());
     // }
 
-    let Some(target) = &targets.get(authority).map(|target| &target.beamconnect) else {
+    let Some(site) = &targets.get(authority) else {
         return if uri.path() == "/sites" {
             // Case 2: target not in sites and /sites
             respond_with_sites(targets)
         } else {
-            warn!(
-                "Failed to lookup virtualhost in central mapping: {}",
-                authority
-            );
+            warn!("Failed to lookup virtualhost in central mapping: {authority}");
             Err(StatusCode::UNAUTHORIZED.into())
         };
     };
+    let target = &site.beamconnect;
 
     // Set the right authority as it might have been passed by the caller because it was a CONNECT request
     *req.uri_mut() = {
         let mut parts = req.uri().to_owned().into_parts();
-        parts.authority = Some(authority.clone());
+        parts.authority = Some(site.remap_vhost.as_ref().unwrap_or(authority).clone());
         // CONNECT requests don't have a scheme
         if req.method() != hyper::Method::CONNECT {
             // If this is set it means we came from a tls terminated request which means the client executing the request should use https
