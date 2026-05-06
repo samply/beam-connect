@@ -7,7 +7,7 @@ use common::TEST_CLIENT;
 
 pub async fn test_normal(scheme: &str) {
     let res = TEST_CLIENT
-        .get(format!("{scheme}://echo-get?foo1=bar1&foo2=bar2"))
+        .get(format!("{scheme}://remap?foo1=bar1&foo2=bar2"))
         .send()
         .await
         .unwrap();

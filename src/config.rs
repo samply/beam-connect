@@ -120,6 +120,8 @@ pub(crate) struct Site {
     pub(crate) name: String,
     #[serde(with = "http_serde::authority")]
     pub(crate) virtualhost: Authority,
+    #[serde(with = "http_serde::option::authority", rename = "remapVhost", default, skip_serializing)]
+    pub(crate) remap_vhost: Option<Authority>,
     pub(crate) beamconnect: AppId,
 }
 
