@@ -2,7 +2,7 @@ use std::{
     fs::{self, read_to_string},
     path::PathBuf,
     str::FromStr,
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -13,7 +13,6 @@ use hyper::{Uri, header, http::uri::Authority};
 use regex::Regex;
 use reqwest::{Certificate, Client, Url};
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
 use tokio_native_tls::{
     TlsAcceptor,
     native_tls::{self, Identity},
@@ -120,7 +119,12 @@ pub(crate) struct Site {
     pub(crate) name: String,
     #[serde(with = "http_serde::authority")]
     pub(crate) virtualhost: Authority,
-    #[serde(with = "http_serde::option::authority", rename = "remapVhost", default, skip_serializing)]
+    #[serde(
+        with = "http_serde::option::authority",
+        rename = "remapVhost",
+        default,
+        skip_serializing
+    )]
     pub(crate) remap_vhost: Option<Authority>,
     pub(crate) beamconnect: AppId,
 }
@@ -287,10 +291,12 @@ impl CentralTargetsKind {
         }
     }
 
+    #[tracing::instrument(skip_all, ret, err)]
     async fn fetch(
         client: &Client,
         fetch_url: &str,
     ) -> Result<(Duration, CentralMapping), BeamConnectError> {
+        tracing::debug!("Fetching sites");
         let res = client.get(fetch_url).send().await.map_err(|e| {
             BeamConnectError::ConfigurationError(format!(
                 "Cannot retrieve central service discovery configuration: {e}"
@@ -327,21 +333,23 @@ impl CentralTargetsKind {
         match self {
             CentralTargetsKind::Static(targets) => targets.clone(),
             CentralTargetsKind::Dynamic { fetch_url, prev } => {
-                let mut prev = prev.lock().await;
-                if prev.0 < Instant::now() {
+                if let Ok(prev_lock) = prev.lock()
+                    && prev_lock.0 > Instant::now()
+                {
+                    prev_lock.1.clone()
+                } else {
                     let (cache_for, targets) = match Self::fetch(client, fetch_url.as_str()).await {
                         Ok(res) => res,
                         Err(e) => {
                             tracing::warn!(
                                 "Failed to fetch central targets: {e:#}.\nUsing cached targets instead."
                             );
-                            return prev.1.clone();
+                            return prev.lock().unwrap().1.clone();
                         }
                     };
-                    *prev = (Instant::now() + cache_for, targets.clone());
-                    return targets;
+                    *prev.lock().unwrap() = (Instant::now() + cache_for, targets.clone());
+                    targets
                 }
-                prev.1.clone()
             }
         }
     }
