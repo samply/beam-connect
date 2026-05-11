@@ -90,6 +90,12 @@ struct CliArgs {
     #[clap(long, env, value_parser, default_value = "3600")]
     expire: u64,
 
+    /// Number of retries for fetching a reply from beam for an outgoing request.
+    /// AND
+    /// Number of retries for submitting a reply to beam for an incoming request.
+    #[clap(long, env, value_parser, default_value_t = 3)]
+    per_request_beam_retries: usize,
+
     /// If set will enable any local apps to authenticate without the `Proxy-Authorization` header.
     /// Security note: This allows any app with network access to beam-connect to send requests to any other beam-connect service in the beam network.
     #[clap(long, env, action)]
@@ -249,6 +255,7 @@ pub(crate) struct Config {
     pub(crate) client: Client,
     pub(crate) tls_acceptor: Option<Arc<TlsAcceptor>>,
     pub(crate) no_auth: bool,
+    pub(crate) per_request_beam_retries: usize,
 }
 
 fn load_local_targets(
@@ -430,6 +437,7 @@ impl Config {
             expire,
             client,
             tls_acceptor,
+            per_request_beam_retries: args.per_request_beam_retries,
         })
     }
 }

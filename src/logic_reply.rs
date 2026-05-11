@@ -171,27 +171,38 @@ async fn send_reply(
         body: reply_body,
     };
     debug!("Delivering response to Proxy: {msg:?}");
-    let resp = config
-        .client
-        .put(format!(
-            "{}v1/tasks/{}/results/{}",
-            config.proxy_url,
-            task.id,
-            config.my_app_id.clone()
-        ))
-        .header(header::AUTHORIZATION, config.proxy_auth.clone())
-        .json(&msg)
-        .send()
-        .await
-        .map_err(BeamConnectError::ProxyReqwestError)?;
+    let mut tries = 0;
+    loop {
+        let resp = config
+            .client
+            .put(format!(
+                "{}v1/tasks/{}/results/{}",
+                config.proxy_url,
+                task.id,
+                config.my_app_id.clone()
+            ))
+            .header(header::AUTHORIZATION, config.proxy_auth.clone())
+            .json(&msg)
+            .send()
+            .await
+            .map_err(BeamConnectError::ProxyReqwestError)?;
+        trace!("Put result beam reply: {resp:#?}");
 
-    if let StatusCode::CREATED | StatusCode::NO_CONTENT = resp.status() {
-        Ok(())
-    } else {
-        Err(BeamConnectError::ProxyOtherError(format!(
-            "Got error code {} trying to submit our result.",
-            resp.status()
-        )))
+        match resp.status() {
+            StatusCode::CREATED | StatusCode::NO_CONTENT => break Ok(()),
+            s if tries > config.per_request_beam_retries => {
+                warn!("Error fetching reply, got code: {s}. Giving up");
+                break Err(BeamConnectError::ProxyOtherError(format!(
+                    "Got error code {} trying to submit our result.",
+                    resp.status()
+                )));
+            }
+            s => {
+                warn!("Failed to submit reply, status: {s}. Retrying");
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                tries += 1;
+            }
+        };
     }
 }
 
