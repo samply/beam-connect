@@ -7,6 +7,7 @@ use hyper::http::uri::{Authority, Scheme};
 use hyper::{Request, StatusCode, Uri, header};
 use serde_json::Value;
 use std::str::FromStr;
+use std::time::Duration;
 use tracing::{Instrument, debug, error, info, info_span, trace, warn};
 
 use crate::Response;
@@ -147,8 +148,7 @@ async fn handle_via_tasks(
         return Err(StatusCode::BAD_GATEWAY.into());
     }
 
-    let mut tries = 0_u8;
-    const MAX_RETRIES: u8 = 3;
+    let mut tries = 0;
     let resp = loop {
         let resp = config
             .client
@@ -168,16 +168,16 @@ async fn handle_via_tasks(
 
         match resp.status() {
             StatusCode::OK => break resp,
-            s if tries > MAX_RETRIES => {
+            s if tries > config.per_request_beam_retries => {
                 warn!("Error fetching reply, got code: {s}. Giving up");
                 return Err(StatusCode::BAD_GATEWAY)?;
             }
             s => {
                 warn!("Failed to fetch reply, status: {s}. Retrying");
+                tokio::time::sleep(Duration::from_secs(1)).await;
                 tries += 1;
             }
         };
-        tries += 1;
     };
 
     let mut task_results = resp
