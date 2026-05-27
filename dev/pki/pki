@@ -57,7 +57,7 @@ function request_proxy() {
      application="${1:-app1}"
      ttl="${2:-24h}"
      cn="${application}.$BROKER_ID"
-     request "$application" "$cn" "$ttl" 
+     request "$application" "$cn" "$ttl"
 }
 
 function request() {

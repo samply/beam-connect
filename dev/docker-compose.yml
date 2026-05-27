@@ -10,6 +10,8 @@ services:
       VAULT_ADDR: http://0.0.0.0:8200
       SKIP_SETCAP: true
     user: 0:0
+    cap_add:
+      - IPC_LOCK
     volumes:
       - ./pki:/pki
     networks:
