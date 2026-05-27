@@ -237,20 +237,17 @@ async fn execute_http_task(
             uri = uri.scheme(scheme);
         }
         uri = if let Some(path) = target.replace.path {
-            uri.path_and_query(&format!(
+            uri.path_and_query(format!(
                 "/{path}{}",
-                task_req
-                    .url
-                    .path_and_query()
-                    .unwrap_or(&PathAndQuery::from_static(""))
+                task_req.url.path_and_query().map_or("", |p| p.as_str())
             ))
         } else {
             uri.path_and_query(
                 task_req
                     .url
                     .path_and_query()
-                    .unwrap_or(&PathAndQuery::from_static(""))
-                    .as_str(),
+                    .cloned()
+                    .unwrap_or(PathAndQuery::from_static("/")), // Empty path and query is rejected since http 1.0.4
             )
         };
     }
