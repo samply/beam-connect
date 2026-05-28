@@ -7,11 +7,11 @@ use hyper::http::uri::{Authority, Scheme};
 use hyper::{Request, StatusCode, Uri, header};
 use serde_json::Value;
 use std::str::FromStr;
-use std::time::Duration;
-use tracing::{Instrument, debug, error, info, info_span, trace, warn};
+use std::sync::Arc;
+use tracing::{Instrument, debug, error, info, info_span, warn};
 
-use crate::Response;
 use crate::config::CentralMapping;
+use crate::{Response, retry_beam_req};
 use crate::{
     config::Config,
     msg::{HttpRequest, HttpResponse},
@@ -23,7 +23,7 @@ use crate::{
 /// This function knows from its map which app to direct the message to
 pub(crate) async fn handler_http(
     mut req: Request<Incoming>,
-    config: &Config,
+    config: &'static Config,
     https_authority: Option<Authority>,
 ) -> Result<Response, MyStatusCode> {
     let targets = &config.targets_public.get(&config.client).await;
@@ -124,7 +124,7 @@ pub(crate) async fn handler_http(
 
 async fn handle_via_tasks(
     req: Request<Incoming>,
-    config: &Config,
+    config: &'static Config,
     target: &AppId,
     auth: HeaderValue,
 ) -> Result<Response, MyStatusCode> {
@@ -132,53 +132,50 @@ async fn handle_via_tasks(
         warn!("Forwarding of CONNECT requests is only supported with the 'sockets' feature");
         return Err(StatusCode::NOT_IMPLEMENTED.into());
     }
-    let msg = http_req_to_struct(req, &config.my_app_id, &target, config.expire).await?;
+    let msg = Arc::new(http_req_to_struct(req, &config.my_app_id, &target, config.expire).await?);
+    let msg_id = msg.id;
 
     // Send to Proxy
     debug!("SENDING request to Proxy: {msg:#?}");
-    let resp = config
-        .client
-        .post(format!("{}v1/tasks", config.proxy_url))
-        .header(header::AUTHORIZATION, auth.clone())
-        .json(&msg)
-        .send()
-        .await
-        .map_err(|_| StatusCode::BAD_GATEWAY)?;
-    if resp.status() != StatusCode::CREATED {
-        return Err(StatusCode::BAD_GATEWAY.into());
-    }
-
-    let mut tries = 0;
-    let resp = loop {
-        let resp = config
-            .client
-            .get(format!(
-                "{}v1/tasks/{}/results?wait_count=1",
-                config.proxy_url, msg.id
-            ))
-            .header(header::AUTHORIZATION, auth.clone())
-            .header(header::ACCEPT, "application/json")
-            .send()
-            .await
-            .map_err(|e| {
-                warn!("Got error from server: {e}");
-                StatusCode::BAD_GATEWAY
-            })?;
-        trace!("Got beam reply: {resp:#?}");
-
-        match resp.status() {
-            StatusCode::OK => break resp,
-            s if tries > config.per_request_beam_retries => {
-                warn!("Error fetching reply, got code: {s}. Giving up");
-                return Err(StatusCode::BAD_GATEWAY)?;
+    retry_beam_req(
+        || {
+            let auth = auth.clone();
+            let msg = Arc::clone(&msg);
+            async move {
+                config
+                    .client
+                    .post(format!("{}v1/tasks", config.proxy_url))
+                    .header(header::AUTHORIZATION, auth)
+                    .json(msg.as_ref())
+                    .send()
+                    .await
             }
-            s => {
-                warn!("Failed to fetch reply, status: {s}. Retrying");
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                tries += 1;
+        },
+        config.per_request_beam_retries,
+    )
+    .await
+    .map_err(|e| MyStatusCode::from(e.status().unwrap_or(StatusCode::BAD_GATEWAY)))?;
+
+    let resp = retry_beam_req(
+        move || {
+            let auth = auth.clone();
+            async move {
+                config
+                    .client
+                    .get(format!(
+                        "{}v1/tasks/{msg_id}/results?wait_count=1",
+                        config.proxy_url
+                    ))
+                    .header(header::AUTHORIZATION, auth)
+                    .header(header::ACCEPT, "application/json")
+                    .send()
+                    .await
             }
-        };
-    };
+        },
+        config.per_request_beam_retries,
+    )
+    .await
+    .map_err(|e| MyStatusCode::from(e.status().unwrap_or(StatusCode::BAD_GATEWAY)))?;
 
     let mut task_results = resp
         .json::<Vec<TaskResult<beam_lib::RawString>>>()
