@@ -180,3 +180,45 @@ pub(crate) async fn handler_http_wrapper(
         }
     }
 }
+
+// Can't use AsyncFnMut closure here without -Zhigher-ranked-assumptions :sad:
+pub async fn retry_beam_req<F: Fn() -> Fut, Fut>(
+    req_fn: F,
+    retries: usize,
+) -> reqwest::Result<reqwest::Response>
+where
+    Fut: Send,
+    Fut: Future<Output = reqwest::Result<reqwest::Response>>,
+{
+    let mut tries = 0;
+    loop {
+        tries += 1;
+        let resp = match req_fn().await {
+            Ok(resp) => resp,
+            Err(e) if e.is_timeout() && tries < retries => {
+                warn!("Timeout requesting beam: {e:#?}. Retrying");
+                continue;
+            }
+            Err(e) => break Err(e),
+        };
+        tracing::trace!("Got beam reply: {resp:#?}");
+
+        match resp.error_for_status_ref() {
+            Ok(_) => break Ok(resp),
+            Err(_) if tries > retries => {
+                warn!(
+                    "Error requesting beam, got code: {}. Retrying",
+                    resp.status()
+                );
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+            Err(e) => {
+                warn!(
+                    "Error requesting beam, got code: {}. Giving up",
+                    resp.status()
+                );
+                break Err(e);
+            }
+        }
+    }
+}

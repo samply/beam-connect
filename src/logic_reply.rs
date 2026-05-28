@@ -12,6 +12,7 @@ use crate::{
     config::Config,
     errors::BeamConnectError,
     msg::{HttpRequest, HttpResponse},
+    retry_beam_req,
 };
 
 pub async fn poller<F, Fut>(f: F)
@@ -162,48 +163,38 @@ async fn send_reply(
             )
         }
     };
-    let msg = TaskResult {
+    let msg = Arc::new(TaskResult {
         from: config.my_app_id.clone().into(),
         to: vec![task.from.clone()],
         task: task.id,
         status,
         metadata: Value::Null,
         body: reply_body,
-    };
+    });
     debug!("Delivering response to Proxy: {msg:?}");
-    let mut tries = 0;
-    loop {
-        let resp = config
-            .client
-            .put(format!(
-                "{}v1/tasks/{}/results/{}",
-                config.proxy_url,
-                task.id,
-                config.my_app_id.clone()
-            ))
-            .header(header::AUTHORIZATION, config.proxy_auth.clone())
-            .json(&msg)
-            .send()
-            .await
-            .map_err(BeamConnectError::ProxyReqwestError)?;
-        trace!("Put result beam reply: {resp:#?}");
-
-        match resp.status() {
-            StatusCode::CREATED | StatusCode::NO_CONTENT => break Ok(()),
-            s if tries > config.per_request_beam_retries => {
-                warn!("Error fetching reply, got code: {s}. Giving up");
-                break Err(BeamConnectError::ProxyOtherError(format!(
-                    "Got error code {} trying to submit our result.",
-                    resp.status()
-                )));
+    retry_beam_req(
+        move || {
+            let msg = Arc::clone(&msg);
+            async move {
+                config
+                    .client
+                    .put(format!(
+                        "{}v1/tasks/{}/results/{}",
+                        config.proxy_url,
+                        task.id,
+                        config.my_app_id.clone()
+                    ))
+                    .header(header::AUTHORIZATION, config.proxy_auth.clone())
+                    .json(msg.as_ref())
+                    .send()
+                    .await
             }
-            s => {
-                warn!("Failed to submit reply, status: {s}. Retrying");
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                tries += 1;
-            }
-        };
-    }
+        },
+        config.per_request_beam_retries,
+    )
+    .await
+    .map_err(BeamConnectError::ProxyReqwestError)?;
+    Ok(())
 }
 
 async fn execute_http_task(
