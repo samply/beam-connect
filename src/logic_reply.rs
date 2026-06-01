@@ -88,29 +88,41 @@ async fn claim_or_answer(
     }
 }
 
-async fn claim_task<T>(task: &TaskRequest<T>, config: &Config) -> Result<(), BeamConnectError> {
-    let msg = TaskResult {
+async fn claim_task(
+    task: &TaskRequest<HttpRequest>,
+    config: &Config,
+) -> Result<(), BeamConnectError> {
+    let msg = Arc::new(TaskResult {
         from: config.my_app_id.clone().into(),
         to: vec![task.from.clone()],
         task: task.id,
         status: WorkStatus::Claimed,
         metadata: Value::Null,
         body: (),
-    };
+    });
     debug!("Claiming: {msg:?}");
-    let resp = config
-        .client
-        .put(format!(
-            "{}v1/tasks/{}/results/{}",
-            config.proxy_url,
-            task.id,
-            config.my_app_id.clone()
-        ))
-        .header(header::AUTHORIZATION, config.proxy_auth.clone())
-        .json(&msg)
-        .send()
-        .await
-        .map_err(BeamConnectError::ProxyReqwestError)?;
+    let resp = retry_beam_req(
+        move || {
+            let msg = Arc::clone(&msg);
+            async move {
+                config
+                    .client
+                    .put(format!(
+                        "{}v1/tasks/{}/results/{}",
+                        config.proxy_url,
+                        task.id,
+                        config.my_app_id.clone()
+                    ))
+                    .header(header::AUTHORIZATION, config.proxy_auth.clone())
+                    .json(msg.as_ref())
+                    .send()
+                    .await
+            }
+        },
+        config.per_request_beam_retries,
+    )
+    .await
+    .map_err(BeamConnectError::ProxyReqwestError)?;
 
     if let StatusCode::CREATED | StatusCode::NO_CONTENT = resp.status() {
         Ok(())
