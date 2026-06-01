@@ -205,7 +205,7 @@ where
 
         match resp.error_for_status_ref() {
             Ok(_) => break Ok(resp),
-            Err(_) if tries > retries => {
+            Err(_) if tries < retries => {
                 warn!(
                     "Error requesting beam, got code: {}. Retrying",
                     resp.status()
