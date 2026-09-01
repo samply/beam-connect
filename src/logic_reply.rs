@@ -282,7 +282,7 @@ async fn fetch_task(config: &Config) -> Result<Vec<TaskRequest<HttpRequest>>, Be
     let resp = config
         .client
         .get(format!(
-            "{}v1/tasks?to={}&wait_count=1&filter=todo",
+            "{}v1/tasks?to={}&wait_count=1&wait_time=60s&filter=todo",
             config.proxy_url, config.my_app_id
         ))
         .header(header::AUTHORIZATION, config.proxy_auth.clone())
