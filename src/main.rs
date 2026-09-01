@@ -207,6 +207,7 @@ where
             Ok(_) => break Ok(resp),
             Err(_) if tries < retries => {
                 warn!(
+                    url = %resp.url(),
                     "Error requesting beam, got code: {}. Retrying",
                     resp.status()
                 );
@@ -214,6 +215,7 @@ where
             }
             Err(e) => {
                 warn!(
+                    url = %resp.url(),
                     "Error requesting beam, got code: {}. Giving up",
                     resp.status()
                 );
