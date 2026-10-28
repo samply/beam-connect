@@ -8,6 +8,10 @@ services:
       VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_TOKEN}
       VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
       VAULT_ADDR: http://0.0.0.0:8200
+      SKIP_SETCAP: true
+    user: 0:0
+    cap_add:
+      - IPC_LOCK
     volumes:
       - ./pki:/pki
     networks:
@@ -80,6 +84,8 @@ services:
      RUST_LOG: ${RUST_LOG}
      no_proxy: proxy2,my.example.com
      TLS_CA_CERTIFICATES_DIR: /custom-cert
+     TLS_TERMINATION_CERT_PATH: ""
+     TLS_TERMINATION_KEY_PATH: ""
   proxy2:
     depends_on: [broker]
     image: samply/beam-proxy:${TAG}

@@ -1,15 +1,57 @@
-use std::{pin::pin, sync::Arc};
+use std::{pin::pin, sync::Arc, time::Duration};
 
 use beam_lib::{AppOrProxyId, TaskRequest, TaskResult, WorkStatus};
 use futures_util::future::TryJoinAll;
-use hyper::{header, StatusCode, Uri, Method, http::uri::PathAndQuery};
-use tracing::{debug, field, info, trace, warn, Instrument, Span};
-use serde_json::Value;
+use hyper::{Method, StatusCode, Uri, header, http::uri::PathAndQuery};
 use reqwest::Response;
+use serde_json::Value;
+use tokio::time::Instant;
+use tracing::{Instrument, Span, debug, error, field, info, trace, warn};
 
-use crate::{config::Config, errors::BeamConnectError, msg::{HttpResponse, HttpRequest}};
+use crate::{
+    config::Config,
+    errors::BeamConnectError,
+    msg::{HttpRequest, HttpResponse},
+    retry_beam_req,
+};
 
-pub(crate) async fn process_requests(config: &'static Config) -> Result<(), BeamConnectError> {
+pub async fn poller<F, Fut>(f: F)
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = Result<(), BeamConnectError>>,
+{
+    let mut tries = 0_u32;
+    let mut timer = Instant::now();
+    loop {
+        debug!("Waiting for next request ...");
+        match f().await {
+            Ok(()) => (),
+            Err(BeamConnectError::ProxyReqwestError(e)) if e.is_connect() => {
+                info!("Trying to connect to beam-proxy. Retrying in 1s.");
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+            Err(BeamConnectError::ProxyTimeoutError) => tries += 1,
+            Err(e @ BeamConnectError::ProxyRejectedAuthorization) => {
+                error!("Stopping polling: {e}");
+                break;
+            }
+            Err(e) if tries < 10 => {
+                tries += 1;
+                warn!("Error while polling: {e}. Will continue with the next one.");
+            }
+            Err(e) => {
+                warn!("Error while polling: {e}. Retrying in 10s.");
+                tokio::time::sleep(Duration::from_secs(10)).await;
+            }
+        }
+        if timer + Duration::from_secs(60) < Instant::now() {
+            tries = tries.saturating_sub(2);
+            timer = Instant::now();
+        }
+    }
+}
+
+pub(crate) async fn poll_and_execute_task(config: &'static Config) -> Result<(), BeamConnectError> {
     // Fetch a batch of tasks and executed them in parallel
     fetch_task(&config)
         .await?
@@ -21,16 +63,17 @@ pub(crate) async fn process_requests(config: &'static Config) -> Result<(), Beam
 }
 
 #[tracing::instrument(skip_all, fields(from = %task.from.hide_broker(), method = %task.body.method, orig_url = %task.body.url, dst_url))]
-async fn claim_or_answer(task: TaskRequest<HttpRequest>, config: &'static Config) -> Result<(), BeamConnectError> {
+async fn claim_or_answer(
+    task: TaskRequest<HttpRequest>,
+    config: &'static Config,
+) -> Result<(), BeamConnectError> {
     let task = Arc::new(task);
     let task2 = Arc::clone(&task);
-    let mut execute_task = Box::pin(async move {
-        execute_http_task(&task2, &config).await
-    });
+    let mut execute_task = Box::pin(async move { execute_http_task(&task2, &config).await });
     let mut claim_task = pin!(claim_task(&task, &config));
     tokio::select! {
         claimed = &mut claim_task => {
-           claimed?; 
+           claimed?;
            let task = Arc::clone(&task);
            tokio::spawn(async move {
                 if let Err(e) = send_reply(&task, &config, execute_task.await).await {
@@ -45,95 +88,149 @@ async fn claim_or_answer(task: TaskRequest<HttpRequest>, config: &'static Config
     }
 }
 
-async fn claim_task<T>(task: &TaskRequest<T>, config: &Config) -> Result<(), BeamConnectError> {
-    let msg = TaskResult {
+async fn claim_task(
+    task: &TaskRequest<HttpRequest>,
+    config: &Config,
+) -> Result<(), BeamConnectError> {
+    let msg = Arc::new(TaskResult {
         from: config.my_app_id.clone().into(),
         to: vec![task.from.clone()],
         task: task.id,
         status: WorkStatus::Claimed,
         metadata: Value::Null,
         body: (),
-    };
+    });
     debug!("Claiming: {msg:?}");
-    let resp = config.client
-        .put(format!("{}v1/tasks/{}/results/{}", config.proxy_url, task.id, config.my_app_id.clone()))
-        .header(header::AUTHORIZATION, config.proxy_auth.clone())
-        .json(&msg)
-        .send()
-        .await
-        .map_err(BeamConnectError::ProxyReqwestError)?;
+    let resp = retry_beam_req(
+        move || {
+            let msg = Arc::clone(&msg);
+            async move {
+                config
+                    .client
+                    .put(format!(
+                        "{}v1/tasks/{}/results/{}",
+                        config.proxy_url,
+                        task.id,
+                        config.my_app_id.clone()
+                    ))
+                    .header(header::AUTHORIZATION, config.proxy_auth.clone())
+                    .json(msg.as_ref())
+                    .send()
+                    .await
+            }
+        },
+        config.per_request_beam_retries,
+    )
+    .await
+    .map_err(BeamConnectError::ProxyReqwestError)?;
 
     if let StatusCode::CREATED | StatusCode::NO_CONTENT = resp.status() {
         Ok(())
     } else {
-        Err(BeamConnectError::ProxyOtherError(format!("Got error code {} trying to submit our result.", resp.status())))
+        Err(BeamConnectError::ProxyOtherError(format!(
+            "Got error code {} trying to submit our result.",
+            resp.status()
+        )))
     }
 }
 
-async fn send_reply(task: &TaskRequest<HttpRequest>, config: &Config, resp: Result<Response, BeamConnectError>) -> Result<(), BeamConnectError> {
+async fn send_reply(
+    task: &TaskRequest<HttpRequest>,
+    config: &Config,
+    resp: Result<Response, BeamConnectError>,
+) -> Result<(), BeamConnectError> {
     let (reply_body, status) = match resp {
         Ok(resp) => {
             let status = resp.status();
             let headers = resp.headers().clone();
             if !status.is_success() {
-                warn!("Httptask returned with status {}. Reporting failure to broker.", resp.status());
+                warn!(
+                    "Httptask returned with status {}. Reporting failure to broker.",
+                    resp.status()
+                );
                 // warn!("Response body was: {}", &body);
             };
-            let body = resp.bytes().await
+            let body = resp
+                .bytes()
+                .await
                 .map_err(BeamConnectError::FailedToReadTargetsReply)?;
-            (HttpResponse {
-                status,
-                headers,
-                body: body.to_vec()
-            }, WorkStatus::Succeeded)
-        },
+            (
+                HttpResponse {
+                    status,
+                    headers,
+                    body: body.to_vec(),
+                },
+                WorkStatus::Succeeded,
+            )
+        }
         Err(e) => {
             warn!("Failed to execute http task. Err: {e}");
-            (HttpResponse { 
-                body: b"Error executing http task. See beam connect logs".to_vec(),
-                status: StatusCode::INTERNAL_SERVER_ERROR,
-                headers: Default::default(), 
-            }, WorkStatus::PermFailed)
-        },
+            (
+                HttpResponse {
+                    body: b"Error executing http task. See beam connect logs".to_vec(),
+                    status: StatusCode::INTERNAL_SERVER_ERROR,
+                    headers: Default::default(),
+                },
+                WorkStatus::PermFailed,
+            )
+        }
     };
-    let msg = TaskResult {
+    let msg = Arc::new(TaskResult {
         from: config.my_app_id.clone().into(),
         to: vec![task.from.clone()],
         task: task.id,
         status,
         metadata: Value::Null,
         body: reply_body,
-    };
+    });
     debug!("Delivering response to Proxy: {msg:?}");
-    let resp = config.client
-        .put(format!("{}v1/tasks/{}/results/{}", config.proxy_url, task.id, config.my_app_id.clone()))
-        .header(header::AUTHORIZATION, config.proxy_auth.clone())
-        .json(&msg)
-        .send()
-        .await
-        .map_err(BeamConnectError::ProxyReqwestError)?;
-
-    if let StatusCode::CREATED | StatusCode::NO_CONTENT = resp.status() {
-        Ok(())
-    } else {
-        Err(BeamConnectError::ProxyOtherError(format!("Got error code {} trying to submit our result.", resp.status())))
-    }
+    retry_beam_req(
+        move || {
+            let msg = Arc::clone(&msg);
+            async move {
+                config
+                    .client
+                    .put(format!(
+                        "{}v1/tasks/{}/results/{}",
+                        config.proxy_url,
+                        task.id,
+                        config.my_app_id.clone()
+                    ))
+                    .header(header::AUTHORIZATION, config.proxy_auth.clone())
+                    .json(msg.as_ref())
+                    .send()
+                    .await
+            }
+        },
+        config.per_request_beam_retries,
+    )
+    .await
+    .map_err(BeamConnectError::ProxyReqwestError)?;
+    Ok(())
 }
 
-async fn execute_http_task(task: &TaskRequest<HttpRequest>, config: &Config) -> Result<Response, BeamConnectError> {
+async fn execute_http_task(
+    task: &TaskRequest<HttpRequest>,
+    config: &Config,
+) -> Result<Response, BeamConnectError> {
     let task_req = &task.body;
     let target = config
         .targets_local
-        .get(&task_req.url) 
+        .get(&task_req.url)
         .ok_or_else(|| BeamConnectError::NoLocalMapping(task_req.url.clone()))?;
     match &task.from {
-        AppOrProxyId::App(app) if target.can_be_accessed_by(app) => {},
-        id => return Err(BeamConnectError::IdNotAuthorizedToAccessUrl(id.clone(), task_req.url.clone())),
+        AppOrProxyId::App(app) if target.can_be_accessed_by(app) => {}
+        id => {
+            return Err(BeamConnectError::IdNotAuthorizedToAccessUrl(
+                id.clone(),
+                task_req.url.clone(),
+            ));
+        }
     };
     if task_req.method == Method::CONNECT {
         debug!("Connect Request URL: {:?}", task_req.url);
     }
-    
+
     let mut uri = Uri::builder();
     // Normal non CONNECT http request replacement
     if let Some(scheme) = task_req.url.scheme_str() {
@@ -143,14 +240,21 @@ async fn execute_http_task(task: &TaskRequest<HttpRequest>, config: &Config) -> 
             uri = uri.scheme(scheme);
         }
         uri = if let Some(path) = target.replace.path {
-            uri.path_and_query(&format!("/{path}{}", task_req.url.path_and_query().unwrap_or(&PathAndQuery::from_static(""))))
+            uri.path_and_query(format!(
+                "/{path}{}",
+                task_req.url.path_and_query().map_or("", |p| p.as_str())
+            ))
         } else {
-            uri.path_and_query(task_req.url.path_and_query().unwrap_or(&PathAndQuery::from_static("")).as_str())
+            uri.path_and_query(
+                task_req
+                    .url
+                    .path_and_query()
+                    .cloned()
+                    .unwrap_or(PathAndQuery::from_static("/")), // Empty path and query is rejected since http 1.0.4
+            )
         };
-    } 
-    let uri = uri
-        .authority(target.replace.authority.to_owned())
-        .build()?;
+    }
+    let uri = uri.authority(target.replace.authority.to_owned()).build()?;
 
     Span::current().record("dst_url", field::display(&uri));
     let mut headers = task_req.headers.clone();
@@ -162,7 +266,8 @@ async fn execute_http_task(task: &TaskRequest<HttpRequest>, config: &Config) -> 
         headers.remove(header::HOST);
     }
     info!("Executing");
-    let resp = config.client
+    let resp = config
+        .client
         .request(task_req.method.clone(), uri.to_string())
         .headers(headers)
         .body(task_req.body.to_vec())
@@ -174,25 +279,37 @@ async fn execute_http_task(task: &TaskRequest<HttpRequest>, config: &Config) -> 
 
 async fn fetch_task(config: &Config) -> Result<Vec<TaskRequest<HttpRequest>>, BeamConnectError> {
     debug!("fetching requests from proxy");
-    let resp = config.client
-        .get(format!("{}v1/tasks?to={}&wait_count=1&filter=todo", config.proxy_url, config.my_app_id))
+    let resp = config
+        .client
+        .get(format!(
+            "{}v1/tasks?to={}&wait_count=1&wait_time=60s&filter=todo",
+            config.proxy_url, config.my_app_id
+        ))
         .header(header::AUTHORIZATION, config.proxy_auth.clone())
         .header(header::ACCEPT, "application/json")
         .send()
         .await
         .map_err(BeamConnectError::ProxyReqwestError)?;
     match resp.status() {
-        StatusCode::OK => {
+        StatusCode::OK | StatusCode::PARTIAL_CONTENT => {
             trace!("Got tasks from beam: {resp:#?}");
-        },
-        StatusCode::GATEWAY_TIMEOUT => return Err(BeamConnectError::ProxyTimeoutError),
+        }
+        StatusCode::GATEWAY_TIMEOUT | StatusCode::BAD_GATEWAY => {
+            return Err(BeamConnectError::ProxyTimeoutError);
+        }
         StatusCode::UNAUTHORIZED => return Err(BeamConnectError::ProxyRejectedAuthorization),
         _ => {
-            return Err(BeamConnectError::ProxyOtherError(format!("Got response code {}", resp.status())));
+            return Err(BeamConnectError::ProxyOtherError(format!(
+                "Got response code {}",
+                resp.status()
+            )));
         }
     }
-    resp.json::<Vec<TaskRequest<HttpRequest>>>().await.map_err(|e| {
-        warn!("Unable to decode TaskRequest<HttpRequest>; error: {e}.");
-        BeamConnectError::ProxyOtherError(e.to_string())
-    }).map_err(Into::into)
+    resp.json::<Vec<TaskRequest<HttpRequest>>>()
+        .await
+        .map_err(|e| {
+            warn!("Unable to decode TaskRequest<HttpRequest>; error: {e}.");
+            BeamConnectError::ProxyOtherError(e.to_string())
+        })
+        .map_err(Into::into)
 }

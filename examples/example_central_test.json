@@ -3,6 +3,20 @@
         {
             "id": "C2",
             "name": "connect2",
+            "virtualhost": "remap",
+            "remapVhost": "echo-get",
+            "beamconnect": "app2.proxy2.broker"
+        },
+        {
+            "id": "C2",
+            "name": "connect2",
+            "virtualhost": "remap:443",
+            "remapVhost": "echo-get",
+            "beamconnect": "app2.proxy2.broker"
+        },
+        {
+            "id": "C2",
+            "name": "connect2",
             "virtualhost": "echo-get",
             "beamconnect": "app2.proxy2.broker"
         },

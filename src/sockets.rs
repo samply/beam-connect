@@ -1,61 +1,49 @@
-use std::{time::Duration, collections::HashSet, convert::Infallible};
+use std::convert::Infallible;
 
+use beam_lib::{AppId, AppOrProxyId, MsgId, SocketTask};
 use futures_util::TryStreamExt;
-use http_body_util::{combinators::BoxBody, BodyExt, BodyStream, StreamBody};
-use hyper::{body::Incoming, header, http::{uri::PathAndQuery, HeaderValue}, service::service_fn, upgrade::OnUpgrade, Request, StatusCode, Uri};
+use http_body_util::{BodyExt, BodyStream, StreamBody, combinators::BoxBody};
+use hyper::{
+    Request, StatusCode, Uri,
+    body::Incoming,
+    header,
+    http::{HeaderValue, uri::PathAndQuery},
+    service::service_fn,
+    upgrade::OnUpgrade,
+};
 use hyper_util::rt::{TokioExecutor, TokioIo};
-use tokio::{io::AsyncWriteExt, task::JoinHandle};
-use tracing::{error, warn, debug, info};
-use beam_lib::{SocketTask, MsgId, AppId, AppOrProxyId};
 use reqwest::Response;
+use tokio::{io::AsyncWriteExt, net::TcpStream};
+use tracing::{Instrument, Span, debug, info, warn};
 
 use crate::{config::Config, errors::BeamConnectError, structs::MyStatusCode};
 
-
-pub(crate) fn spawn_socket_task_poller(config: &'static Config) -> JoinHandle<()> {
-    tokio::spawn(async move {
-        use BeamConnectError::*;
-        let mut seen: HashSet<MsgId> = HashSet::new();
-
-        loop {
-            let tasks = match poll_socket_task(&config).await {
-                Ok(tasks) => tasks,
-                Err(HyperBuildError(e)) => {
-                    error!("{e}");
-                    error!("This is most likely caused by wrong configuration");
-                    break;
-                },
-                Err(ProxyTimeoutError) => continue,
-                Err(e) => {
-                    warn!("Error during socket task polling: {e}");
-                    tokio::time::sleep(Duration::from_secs(10)).await;
-                    continue;
-                }
-            };
-            for task in tasks {
-                if seen.contains(&task.id) {
-                    continue;
-                }
-                seen.insert(task.id.clone());
-                let AppOrProxyId::App(client) = task.from else {
-                    warn!("Invalid app id skipping");
-                    continue;
-                };
-                tokio::spawn(async move {
-                    match connect_proxy(&task.id, config).await {
-                        Ok(resp) => tunnel(resp, client, config).await,
-                        Err(e) => {
-                            warn!("{e}");
-                        },
-                    };
-                });
-            }
-        }
-    })
+pub(crate) async fn poll_and_execute_socket_task(
+    config: &'static Config,
+) -> Result<(), BeamConnectError> {
+    let tasks = poll_socket_task(config).await?;
+    for task in tasks {
+        let span =
+            tracing::info_span!("socket task", from = %task.from.hide_broker(), id = %task.id);
+        let AppOrProxyId::App(client) = task.from else {
+            warn!("Invalid app id skipping");
+            return Err(BeamConnectError::ReplyInvalid(format!(
+                "Invalid app id: {:?}",
+                task.from
+            )));
+        };
+        let resp = connect_proxy(&task.id, config)
+            .instrument(span.clone())
+            .await?;
+        // After the connection is established we can polling again for new socket tasks.
+        tokio::spawn(tunnel(resp, client, config).instrument(span));
+    }
+    Ok(())
 }
 
 async fn poll_socket_task(config: &Config) -> Result<Vec<SocketTask>, BeamConnectError> {
-    let resp = config.client
+    let resp = config
+        .client
         .get(format!("{}v1/sockets", config.proxy_url))
         .header(header::AUTHORIZATION, config.proxy_auth.clone())
         .header(header::ACCEPT, "application/json")
@@ -63,15 +51,27 @@ async fn poll_socket_task(config: &Config) -> Result<Vec<SocketTask>, BeamConnec
         .await
         .map_err(BeamConnectError::ProxyReqwestError)?;
     match resp.status() {
-        StatusCode::OK => {},
-        StatusCode::GATEWAY_TIMEOUT => return Err(BeamConnectError::ProxyTimeoutError),
-        e => return Err(BeamConnectError::ProxyOtherError(format!("Unexpected status code {e}")))
+        StatusCode::OK | StatusCode::PARTIAL_CONTENT => {}
+        StatusCode::UNAUTHORIZED => {
+            return Err(BeamConnectError::ProxyRejectedAuthorization);
+        }
+        StatusCode::GATEWAY_TIMEOUT | StatusCode::BAD_GATEWAY => {
+            return Err(BeamConnectError::ProxyTimeoutError);
+        }
+        e => {
+            return Err(BeamConnectError::ProxyOtherError(format!(
+                "Unexpected status code {e}"
+            )));
+        }
     };
-    resp.json().await.map_err(BeamConnectError::ProxyReqwestError)
+    resp.json()
+        .await
+        .map_err(BeamConnectError::ProxyReqwestError)
 }
 
 async fn connect_proxy(task_id: &MsgId, config: &Config) -> Result<Response, BeamConnectError> {
-    let resp = config.client
+    let resp = config
+        .client
         .get(format!("{}v1/sockets/{task_id}", config.proxy_url))
         .header(header::AUTHORIZATION, config.proxy_auth.clone())
         .header(header::UPGRADE, "tcp")
@@ -80,13 +80,9 @@ async fn connect_proxy(task_id: &MsgId, config: &Config) -> Result<Response, Bea
         .map_err(BeamConnectError::ProxyReqwestError)?;
     let invalid_status_reason = match resp.status() {
         StatusCode::SWITCHING_PROTOCOLS => return Ok(resp),
-        StatusCode::NOT_FOUND | StatusCode::GONE => {
-            "Task already expired".to_string()
-        },
-        StatusCode::UNAUTHORIZED => {
-            "This socket is not for this authorized for this app".to_string()
-        }
-        other => other.to_string()
+        StatusCode::NOT_FOUND | StatusCode::GONE => "Task already expired".to_string(),
+        StatusCode::UNAUTHORIZED => "This socket task is not authorized for this app".to_string(),
+        other => other.to_string(),
     };
     Err(BeamConnectError::ProxyOtherError(invalid_status_reason))
 }
@@ -97,22 +93,28 @@ fn status_to_response(status: StatusCode) -> crate::Response {
     res
 }
 
-async fn tunnel(proxy: Response, client: AppId, config: &Config) {
+async fn tunnel(proxy: Response, client: AppId, config: &'static Config) {
     let proxy = match proxy.upgrade().await {
         Ok(socket) => socket,
         Err(e) => {
             warn!("Failed to upgrade connection to proxy: {e}");
             return;
-        },
+        }
     };
     let http_err = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
-        .serve_connection_with_upgrades(TokioIo::new(proxy), service_fn(move |req| {
-            let client2 = client.clone();
-            let config2 = config.clone();
-            async move {
-                Ok::<_, Infallible>(execute_http_task(req, &client2, &config2).await.unwrap_or_else(status_to_response))
-            }
-        }))
+        .serve_connection_with_upgrades(
+            TokioIo::new(proxy),
+            service_fn(move |req| {
+                let client = client.clone();
+                async move {
+                    Ok::<_, Infallible>(
+                        execute_http_task(req, &client, config)
+                            .await
+                            .unwrap_or_else(status_to_response),
+                    )
+                }
+            }),
+        )
         .await;
 
     if let Err(e) = http_err {
@@ -120,7 +122,12 @@ async fn tunnel(proxy: Response, client: AppId, config: &Config) {
     }
 }
 
-async fn execute_http_task(mut req: Request<Incoming>, app: &AppId, config: &Config) -> Result<crate::Response, StatusCode> {
+#[tracing::instrument(skip_all, fields(method = %req.method(), orig_url = %req.uri(), destination))]
+async fn execute_http_task(
+    mut req: Request<Incoming>,
+    app: &AppId,
+    config: &Config,
+) -> Result<crate::Response, StatusCode> {
     let uri = req.uri();
     let Some(target) = config.targets_local.get(uri) else {
         warn!("Failed to lookup uri {uri}");
@@ -130,6 +137,26 @@ async fn execute_http_task(mut req: Request<Incoming>, app: &AppId, config: &Con
         warn!("App {app} not authorized to access url {uri}");
         return Err(StatusCode::UNAUTHORIZED);
     };
+    if req.method() == hyper::Method::CONNECT {
+        Span::current().record(
+            "destination",
+            tracing::field::display(&target.replace.authority),
+        );
+        let dst = match TcpStream::connect((
+            target.replace.authority.host(),
+            target.replace.authority.port_u16().unwrap_or(443),
+        ))
+        .await
+        {
+            Ok(dst) => dst,
+            Err(e) => {
+                warn!("Failed to connect to target: {e}");
+                return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            }
+        };
+        tokio::spawn(forward_req_via_socket(req, dst).instrument(Span::current()));
+        return Ok(crate::Response::new(BoxBody::default()));
+    }
     *req.uri_mut() = {
         let mut parts = uri.to_owned().into_parts();
         if target.force_https {
@@ -137,25 +164,46 @@ async fn execute_http_task(mut req: Request<Incoming>, app: &AppId, config: &Con
         }
         parts.authority = Some(target.replace.authority.clone());
         if let Some(path) = target.replace.path {
-            parts.path_and_query = Some(PathAndQuery::try_from(&format!("/{path}{}", parts.path_and_query.as_ref().map(PathAndQuery::as_str).unwrap_or(""))).map_err(|e| {
-                warn!("Failed to set redirect path: {e}");
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?);
+            parts.path_and_query = Some(
+                PathAndQuery::try_from(&format!(
+                    "/{path}{}",
+                    parts
+                        .path_and_query
+                        .as_ref()
+                        .map(PathAndQuery::as_str)
+                        .unwrap_or("")
+                ))
+                .map_err(|e| {
+                    warn!("Failed to set redirect path: {e}");
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?,
+            );
         }
         Uri::from_parts(parts).map_err(|e| {
             warn!("Could not transform uri authority: {e}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?
     };
-    info!("Requesting {} {}", req.method(), req.uri());
+    Span::current().record("destination", tracing::field::display(req.uri()));
+    info!("Executing socket request");
     let req_upgrade = if req.headers().contains_key(header::UPGRADE) {
         req.extensions_mut().remove::<OnUpgrade>()
     } else {
         None
     };
 
-    let mut resp = config.client
-        .execute(req.map(|b| reqwest::Body::wrap_stream(BodyStream::new(b).map_ok(|v| v.into_data().expect("TODO: How to handle trailers?")))).try_into().expect("This should always convert"))
+    let mut resp = config
+        .client
+        .execute(
+            req.map(|b| {
+                reqwest::Body::wrap_stream(
+                    BodyStream::new(b)
+                        .map_ok(|v| v.into_data().expect("TODO: How to handle trailers?")),
+                )
+            })
+            .try_into()
+            .expect("This should always convert"),
+        )
         .await
         .map_err(|e| {
             warn!("Error executuing http task. Failed handshake with server: {e}");
@@ -173,34 +221,51 @@ fn convert_to_hyper_response(resp: Response) -> crate::Response {
     let mut builder = hyper::http::response::Builder::new()
         .status(resp.status())
         .version(resp.version());
-    builder.headers_mut().map(|headers| *headers = resp.headers().clone());
+    builder
+        .headers_mut()
+        .map(|headers| *headers = resp.headers().clone());
     let stream = resp
         .bytes_stream()
         .map_ok(hyper::body::Frame::data)
         .map_err(Into::into);
-    builder.body(BoxBody::new(StreamBody::new(stream))).expect("This should always convert")
+    builder
+        .body(BoxBody::new(StreamBody::new(stream)))
+        .expect("This should always convert")
 }
 
 fn tunnel_upgrade(client: Option<OnUpgrade>, server: Option<OnUpgrade>) {
     if let (Some(client), Some(proxy)) = (client, server) {
-        tokio::spawn(async move {
-            let (client, proxy) = match tokio::try_join!(client, proxy) {
-                Err(e) => {
-                    warn!("Upgrading connection between client and beam-connect failed: {e}");
-                    return;
-                },
-                Ok(sockets) => sockets
-            };
-            let result = tokio::io::copy_bidirectional(&mut TokioIo::new(client), &mut TokioIo::new(proxy)).await;
-            if let Err(e) = result {
-                debug!("Relaying socket connection ended: {e}");
+        tokio::spawn(
+            async move {
+                let (client, proxy) = match tokio::try_join!(client, proxy) {
+                    Err(e) => {
+                        warn!("Upgrading connection between client and beam-connect failed: {e}");
+                        return;
+                    }
+                    Ok(sockets) => sockets,
+                };
+                let result = tokio::io::copy_bidirectional(
+                    &mut TokioIo::new(client),
+                    &mut TokioIo::new(proxy),
+                )
+                .await;
+                if let Err(e) = result {
+                    debug!("Relaying socket connection ended: {e}");
+                }
             }
-        });
+            .instrument(Span::current()),
+        );
     }
 }
 
-pub(crate) async fn handle_via_sockets(mut req: Request<Incoming>, config: &Config, target: &AppId, auth: HeaderValue) -> Result<crate::Response, MyStatusCode> {
-    let resp = config.client
+pub(crate) async fn handle_via_sockets(
+    mut req: Request<Incoming>,
+    config: &Config,
+    target: &AppId,
+    auth: HeaderValue,
+) -> Result<crate::Response, MyStatusCode> {
+    let resp = config
+        .client
         .post(format!("{}v1/sockets/{target}", config.proxy_url))
         .header(header::AUTHORIZATION, auth)
         .header(header::UPGRADE, "tcp")
@@ -209,8 +274,7 @@ pub(crate) async fn handle_via_sockets(mut req: Request<Incoming>, config: &Conf
         .map_err(|e| {
             warn!("Failed to reach proxy: {e}");
             StatusCode::BAD_GATEWAY
-        }
-    )?;
+        })?;
     if resp.status() != StatusCode::SWITCHING_PROTOCOLS {
         return Err(resp.status().into());
     }
@@ -228,11 +292,13 @@ pub(crate) async fn handle_via_sockets(mut req: Request<Incoming>, config: &Conf
             warn!("Error doing handshake with proxy: {e}");
             StatusCode::BAD_GATEWAY
         })?;
-    let req_upgrade = if req.headers().contains_key(header::UPGRADE) {
-        req.extensions_mut().remove::<OnUpgrade>()
-    } else {
-        None
-    };
+    // Upgrade on either http connection upgrades like websockets or CONNECT requests
+    let req_upgrade =
+        if req.headers().contains_key(header::UPGRADE) || req.method() == hyper::Method::CONNECT {
+            Some(hyper::upgrade::on(&mut req))
+        } else {
+            None
+        };
     let resp_future = sender.send_request(req);
     let resp = if let Some(upgrade) = req_upgrade {
         let (resp, proxy_connection) = tokio::join!(resp_future, proxy_conn.without_shutdown());
@@ -249,14 +315,17 @@ pub(crate) async fn handle_via_sockets(mut req: Request<Incoming>, config: &Conf
                             warn!("Failed to send initial bytes from remote to client: {e}");
                         }
                     }
-                    if let Err(e) = tokio::io::copy_bidirectional(&mut client, &mut TokioIo::new(proxy_io.io)).await {
+                    if let Err(e) =
+                        tokio::io::copy_bidirectional(&mut client, &mut TokioIo::new(proxy_io.io))
+                            .await
+                    {
                         debug!("Error relaying connection from client to proxy: {e}");
                     }
                 });
-            },
+            }
             Err(e) => {
                 warn!("Connection failed: {e}");
-            },
+            }
         };
         resp
     } else {
@@ -268,4 +337,17 @@ pub(crate) async fn handle_via_sockets(mut req: Request<Incoming>, config: &Conf
         StatusCode::BAD_GATEWAY
     })?;
     Ok(resp.map(|b| BoxBody::new(b.map_err(Into::into))))
+}
+
+async fn forward_req_via_socket(req: Request<Incoming>, mut dst: TcpStream) {
+    let conn = match hyper::upgrade::on(req).await {
+        Ok(conn) => conn,
+        Err(e) => {
+            warn!("Failed to upgrade connection: {e}");
+            return;
+        }
+    };
+    if let Err(e) = tokio::io::copy_bidirectional(&mut TokioIo::new(conn), &mut dst).await {
+        warn!("Error relaying connection from client to proxy: {e}");
+    }
 }

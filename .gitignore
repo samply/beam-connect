@@ -3,3 +3,4 @@
 dev/pki/*
 !dev/pki/pki
 artifacts/
+.zed

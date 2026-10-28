@@ -12,7 +12,7 @@
     {
         "external": "echo-get:443",
         "internal": "my.example.com:443/get",
-        "allowed": ["app1.proxy1.broker"]
+        "allowed": ["app1.proxy1.broker", "app2.proxy2.broker"]
     },
     {
         "external": "echo-allowed",
